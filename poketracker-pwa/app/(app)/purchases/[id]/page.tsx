@@ -3,6 +3,7 @@ import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { StatusBadge } from '@/components/status-badge'
 import { DeletePurchaseButton } from '@/components/delete-purchase-button'
+import { PurchaseWarehousePackages } from '@/components/purchase-warehouse-packages'
 import { formatDate, formatMoney } from '@/lib/format'
 import { requireUser } from '@/lib/auth'
 import { createSignedImageUrl } from '@/lib/storage'
@@ -182,16 +183,7 @@ export default async function PurchaseDetailPage({
           ) : null}
         </section>
 
-        <section className="panel next-step-card">
-          <span className="eyebrow">Nächster Prozessschritt</span>
-          <h2>Mit OLAEET-Paket verknüpfen</h2>
-          <p>
-            Das Datenmodell enthält bereits Lagerpakete, internationale Sendungen und Inventareinheiten. Die entsprechende Oberfläche folgt nach dem Einkaufsmodul.
-          </p>
-          <button className="button button-secondary" type="button" disabled>
-            OLAEET-Zuordnung folgt
-          </button>
-        </section>
+        <PurchaseWarehousePackages purchaseId={purchase.id} />
       </div>
     </div>
   )
