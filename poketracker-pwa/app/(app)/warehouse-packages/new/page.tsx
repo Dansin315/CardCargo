@@ -2,6 +2,7 @@ import Link from 'next/link'
 import type { Metadata } from 'next'
 import { WarehousePackageForm } from '@/components/warehouse-package-form'
 import { requireUser } from '@/lib/auth'
+import { loadPurchaseImageChoices } from '@/lib/warehouse-package-image-queries'
 import {
   filterAssignablePurchases,
   type PackagePurchaseChoice,
@@ -17,7 +18,7 @@ export default async function NewWarehousePackagePage({
   searchParams: Promise<{ purchase?: string }>
 }) {
   const query = await searchParams
-  const { supabase } = await requireUser()
+  const { user, supabase } = await requireUser()
   const [purchasesResult, linksResult] = await Promise.all([
     supabase
       .from('purchases')
@@ -38,6 +39,10 @@ export default async function NewWarehousePackagePage({
   const selectedPurchaseIds = purchases.some((purchase) => purchase.id === query.purchase)
     ? [query.purchase as string]
     : []
+  const purchaseImages = await loadPurchaseImageChoices(
+    supabase,
+    purchases.map((purchase) => purchase.id),
+  )
 
   return (
     <div className="page-stack">
@@ -49,12 +54,14 @@ export default async function NewWarehousePackagePage({
         <div>
           <span className="eyebrow">Lager in Korea</span>
           <h1>OLAEET-Paket erfassen</h1>
-          <p>Paketdaten protokollieren und noch nicht zugeordnete Einkäufe auswählen.</p>
+          <p>Paketdaten protokollieren, Einkäufe auswählen und Paketbilder ergänzen.</p>
         </div>
       </header>
       <WarehousePackageForm
         mode="create"
+        userId={user.id}
         purchases={purchases}
+        purchaseImages={purchaseImages}
         selectedPurchaseIds={selectedPurchaseIds}
       />
     </div>

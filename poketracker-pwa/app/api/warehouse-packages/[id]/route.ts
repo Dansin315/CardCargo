@@ -3,10 +3,18 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getApiUser } from '@/lib/auth'
 import { hasTrustedRequestOrigin } from '@/lib/request-security'
+import {
+  archiveWarehousePackageImages,
+  removeWarehousePackageImages,
+  removeWarehousePackageStoragePaths,
+  rollbackArchivedWarehousePackageImages,
+  type ArchivedWarehousePackageImages,
+} from '@/lib/warehouse-package-images'
 import { warehousePackageInputSchema } from '@/lib/warehouse-package-schema'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 
 const packageIdSchema = z.string().uuid('Ungültige Paket-ID.')
 type RouteContext = { params: Promise<{ id: string }> }
@@ -39,10 +47,41 @@ export async function PATCH(request: Request, context: RouteContext) {
   const auth = await getApiUser()
   if (!auth.user) return NextResponse.json({ error: auth.error }, { status: auth.status })
 
+  let archived: ArchivedWarehousePackageImages = {
+    imageIds: [],
+    storagePaths: [],
+    warnings: [],
+  }
+  let id = ''
+
   try {
     const { id: rawId } = await context.params
-    const id = packageIdSchema.parse(rawId)
+    id = packageIdSchema.parse(rawId)
     const input = warehousePackageInputSchema.parse(await request.json())
+
+    const { data: currentPackage, error: currentPackageError } = await auth.supabase
+      .from('warehouse_packages')
+      .select('id')
+      .eq('id', id)
+      .eq('user_id', auth.user.id)
+      .maybeSingle()
+    if (currentPackageError) throw new Error(currentPackageError.message)
+    if (!currentPackage) {
+      return NextResponse.json({ error: 'OLAEET-Paket nicht gefunden.' }, { status: 404 })
+    }
+
+    const { data: oldLinks, error: oldLinksError } = await auth.supabase
+      .from('warehouse_package_purchases')
+      .select('purchase_id')
+      .eq('warehouse_package_id', id)
+      .eq('user_id', auth.user.id)
+    if (oldLinksError) throw new Error(oldLinksError.message)
+
+    archived = await archiveWarehousePackageImages({
+      userId: auth.user.id,
+      packageId: id,
+      stagedImages: input.stagedImages,
+    })
 
     const { data, error } = await auth.supabase
       .from('warehouse_packages')
@@ -82,14 +121,25 @@ export async function PATCH(request: Request, context: RouteContext) {
     )
     if (linkError) throw new Error(linkError.message)
 
+    await removeWarehousePackageImages({
+      userId: auth.user.id,
+      packageId: id,
+      imageIds: input.removeManualImageIds,
+    })
+
     revalidatePath('/warehouse-packages')
     revalidatePath(`/warehouse-packages/${id}`)
     revalidatePath(`/warehouse-packages/${id}/edit`)
     revalidatePath('/purchases')
-    for (const purchaseId of input.purchaseIds) revalidatePath(`/purchases/${purchaseId}`)
+    const affectedPurchaseIds = new Set([
+      ...(oldLinks ?? []).map((link) => link.purchase_id),
+      ...input.purchaseIds,
+    ])
+    for (const purchaseId of affectedPurchaseIds) revalidatePath(`/purchases/${purchaseId}`)
 
-    return NextResponse.json({ id })
+    return NextResponse.json({ id, warnings: archived.warnings })
   } catch (error) {
+    if (id) await rollbackArchivedWarehousePackageImages(auth.user.id, id, archived)
     return errorResponse(error, 'Das OLAEET-Paket konnte nicht aktualisiert werden.')
   }
 }
@@ -125,13 +175,21 @@ export async function DELETE(request: Request, context: RouteContext) {
       )
     }
 
-    const { data: purchaseLinks, error: linkReadError } = await auth.supabase
-      .from('warehouse_package_purchases')
-      .select('purchase_id')
-      .eq('warehouse_package_id', id)
-      .eq('user_id', auth.user.id)
+    const [purchaseLinksResult, packageImagesResult] = await Promise.all([
+      auth.supabase
+        .from('warehouse_package_purchases')
+        .select('purchase_id')
+        .eq('warehouse_package_id', id)
+        .eq('user_id', auth.user.id),
+      auth.supabase
+        .from('warehouse_package_images')
+        .select('storage_path')
+        .eq('warehouse_package_id', id)
+        .eq('user_id', auth.user.id),
+    ])
 
-    if (linkReadError) throw new Error(linkReadError.message)
+    if (purchaseLinksResult.error) throw new Error(purchaseLinksResult.error.message)
+    if (packageImagesResult.error) throw new Error(packageImagesResult.error.message)
 
     const { data: deleted, error } = await auth.supabase
       .from('warehouse_packages')
@@ -144,9 +202,15 @@ export async function DELETE(request: Request, context: RouteContext) {
     if (error) throw new Error(error.message)
     if (!deleted) return NextResponse.json({ error: 'OLAEET-Paket nicht gefunden.' }, { status: 404 })
 
+    await removeWarehousePackageStoragePaths(
+      (packageImagesResult.data ?? []).map((image) => image.storage_path),
+    )
+
     revalidatePath('/warehouse-packages')
     revalidatePath('/purchases')
-    for (const link of purchaseLinks ?? []) revalidatePath(`/purchases/${link.purchase_id}`)
+    for (const link of purchaseLinksResult.data ?? []) {
+      revalidatePath(`/purchases/${link.purchase_id}`)
+    }
 
     return NextResponse.json({ id })
   } catch (error) {

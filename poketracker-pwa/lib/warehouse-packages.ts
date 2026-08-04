@@ -66,6 +66,20 @@ export interface WarehousePackagePurchaseLink {
   warehouse_package_id: string
 }
 
+export interface PackagePurchaseImageChoice {
+  id: string
+  purchase_id: string
+  position: number
+  signed_url: string | null
+}
+
+export interface WarehousePackageManualImageChoice {
+  id: string
+  original_filename: string | null
+  position: number
+  signed_url: string | null
+}
+
 /**
  * A purchase may belong to only one OLAEET package at a time.
  * On an edit page, purchases already linked to the current package remain visible.
@@ -91,6 +105,15 @@ export function selectedPurchaseIdsForPackage(
   return links
     .filter((link) => link.warehouse_package_id === packageId)
     .map((link) => link.purchase_id)
+}
+
+
+export function filterPurchaseImagesForSelection(
+  images: PackagePurchaseImageChoice[],
+  selectedPurchaseIds: string[],
+) {
+  const selected = new Set(selectedPurchaseIds)
+  return images.filter((image) => selected.has(image.purchase_id))
 }
 
 export function isValidDateOnly(value: string) {

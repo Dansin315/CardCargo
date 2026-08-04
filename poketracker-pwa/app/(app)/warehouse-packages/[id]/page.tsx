@@ -5,6 +5,10 @@ import { DeleteWarehousePackageButton } from '@/components/delete-warehouse-pack
 import { requireUser } from '@/lib/auth'
 import { formatDate } from '@/lib/format'
 import {
+  loadPurchaseImageChoices,
+  loadWarehousePackageManualImages,
+} from '@/lib/warehouse-package-image-queries'
+import {
   packageRecordSourceLabels,
   packageStatusLabels,
   type PackagePurchaseChoice,
@@ -55,13 +59,19 @@ export default async function WarehousePackageDetailPage({
   let purchases: PackagePurchaseChoice[] = []
 
   if (purchaseIds.length) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('purchases')
       .select('id, title, source_listing_id, purchased_at, status')
       .in('id', purchaseIds)
       .order('created_at', { ascending: false })
+    if (error) throw new Error(error.message)
     purchases = (data ?? []) as unknown as PackagePurchaseChoice[]
   }
+
+  const [purchaseImages, manualImages] = await Promise.all([
+    loadPurchaseImageChoices(supabase, purchaseIds),
+    loadWarehousePackageManualImages(supabase, id),
+  ])
 
   const label =
     warehousePackage.external_package_id ||
@@ -114,6 +124,60 @@ export default async function WarehousePackageDetailPage({
         </div>
       </header>
 
+      <section className="panel">
+        <div className="panel-heading">
+          <div>
+            <h2>Paketbilder</h2>
+            <p>Manuelle OLAEET-Bilder und Bilder der aktuell zugewiesenen Bunjang-Einkäufe.</p>
+          </div>
+          <span className="panel-note">
+            {manualImages.length + purchaseImages.length} Datei
+            {manualImages.length + purchaseImages.length === 1 ? '' : 'en'}
+          </span>
+        </div>
+
+        {manualImages.length || purchaseImages.length ? (
+          <div className="detail-gallery">
+            {manualImages.map((image) => (
+              <figure key={`manual-${image.id}`}>
+                {image.signed_url ? (
+                  <img src={image.signed_url} alt={image.original_filename || 'Manuelles OLAEET-Paketbild'} />
+                ) : (
+                  <div className="missing-image">Bild nicht verfügbar</div>
+                )}
+                <figcaption>
+                  <span>{image.original_filename || `Paketbild ${image.position}`}</span>
+                  <span>Manuell zum OLAEET-Paket hinzugefügt</span>
+                </figcaption>
+              </figure>
+            ))}
+            {purchaseImages.map((image) => {
+              const purchase = purchases.find((item) => item.id === image.purchase_id)
+              return (
+                <figure key={`purchase-${image.id}`}>
+                  {image.signed_url ? (
+                    <img src={image.signed_url} alt={`Angebotsbild von ${purchase?.title ?? 'Bunjang-Einkauf'}`} />
+                  ) : (
+                    <div className="missing-image">Bild nicht verfügbar</div>
+                  )}
+                  <figcaption>
+                    <span>{purchase?.title ?? 'Bunjang-Einkauf'}</span>
+                    <span>Über Einkaufszuordnung eingeblendet</span>
+                  </figcaption>
+                </figure>
+              )
+            })}
+          </div>
+        ) : (
+          <div className="empty-state compact-empty">
+            <p>Für dieses OLAEET-Paket sind noch keine Bilder vorhanden.</p>
+            <Link className="button button-secondary" href={`/warehouse-packages/${id}/edit`}>
+              Bilder hinzufügen
+            </Link>
+          </div>
+        )}
+      </section>
+
       <div className="detail-grid">
         <section className="panel">
           <div className="panel-heading">
@@ -160,7 +224,7 @@ export default async function WarehousePackageDetailPage({
         <div className="panel-heading">
           <div>
             <h2>Enthaltene Einkäufe</h2>
-            <p>Die Einkaufsdatensätze bleiben unabhängig vom Paket erhalten.</p>
+            <p>Wird eine Zuordnung entfernt, verschwinden auch deren Bilder aus dieser Paketansicht.</p>
           </div>
           <span className="panel-note">{purchases.length} verknüpft</span>
         </div>

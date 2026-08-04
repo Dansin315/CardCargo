@@ -4,6 +4,10 @@ import { notFound } from 'next/navigation'
 import { WarehousePackageForm } from '@/components/warehouse-package-form'
 import { requireUser } from '@/lib/auth'
 import {
+  loadPurchaseImageChoices,
+  loadWarehousePackageManualImages,
+} from '@/lib/warehouse-package-image-queries'
+import {
   filterAssignablePurchases,
   selectedPurchaseIdsForPackage,
   type PackagePurchaseChoice,
@@ -20,7 +24,7 @@ export default async function EditWarehousePackagePage({
   params: Promise<{ id: string }>
 }) {
   const { id } = await params
-  const { supabase } = await requireUser()
+  const { user, supabase } = await requireUser()
   const [packageResult, purchasesResult, linksResult] = await Promise.all([
     supabase
       .from('warehouse_packages')
@@ -48,6 +52,13 @@ export default async function EditWarehousePackagePage({
     links,
     id,
   )
+  const [purchaseImages, manualImages] = await Promise.all([
+    loadPurchaseImageChoices(
+      supabase,
+      purchases.map((purchase) => purchase.id),
+    ),
+    loadWarehousePackageManualImages(supabase, id),
+  ])
 
   return (
     <div className="page-stack">
@@ -59,13 +70,16 @@ export default async function EditWarehousePackagePage({
         <div>
           <span className="eyebrow">Lager in Korea</span>
           <h1>OLAEET-Paket bearbeiten</h1>
-          <p>Status, Messwerte, Lagerdaten und Einkaufszuordnungen aktualisieren.</p>
+          <p>Status, Messwerte, Einkaufszuordnungen und manuelle Paketbilder aktualisieren.</p>
         </div>
       </header>
       <WarehousePackageForm
         mode="edit"
+        userId={user.id}
         packageData={packageResult.data as unknown as WarehousePackageRow}
         purchases={purchases}
+        purchaseImages={purchaseImages}
+        manualImages={manualImages}
         selectedPurchaseIds={selectedPurchaseIdsForPackage(links, id)}
       />
     </div>

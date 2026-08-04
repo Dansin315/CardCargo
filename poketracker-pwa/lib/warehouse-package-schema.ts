@@ -31,6 +31,14 @@ const nullableDate = z
   .transform((value) => value || null)
 
 
+const stagedImageSchema = z.object({
+  path: z.string().min(1).max(1_000),
+  originalName: z.string().min(1).max(500),
+  mimeType: z.enum(['image/jpeg', 'image/png', 'image/webp', 'image/gif']),
+  byteSize: z.number().int().positive().max(6 * 1024 * 1024),
+})
+
+
 export const warehousePackageInputSchema = z
   .object({
     externalPackageId: nullableText(200),
@@ -50,6 +58,8 @@ export const warehousePackageInputSchema = z
     heightCm: nullableAmount('Höhe', 10_000),
     notes: nullableText(10_000),
     purchaseIds: z.array(z.string().uuid('Ungültige Einkaufs-ID.')).max(250).default([]),
+    stagedImages: z.array(stagedImageSchema).max(12).default([]),
+    removeManualImageIds: z.array(z.string().uuid('Ungültige Paketbild-ID.')).max(100).default([]),
   })
   .superRefine((value, context) => {
     if (!value.externalPackageId && !value.domesticTrackingNumber) {

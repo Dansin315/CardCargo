@@ -3,10 +3,16 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getApiUser } from '@/lib/auth'
 import { hasTrustedRequestOrigin } from '@/lib/request-security'
+import {
+  archiveWarehousePackageImages,
+  rollbackArchivedWarehousePackageImages,
+  type ArchivedWarehousePackageImages,
+} from '@/lib/warehouse-package-images'
 import { warehousePackageInputSchema } from '@/lib/warehouse-package-schema'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 
 function errorResponse(error: unknown, fallback: string) {
   if (error instanceof z.ZodError) {
@@ -35,6 +41,13 @@ export async function POST(request: Request) {
 
   const auth = await getApiUser()
   if (!auth.user) return NextResponse.json({ error: auth.error }, { status: auth.status })
+
+  let packageId: string | null = null
+  let archived: ArchivedWarehousePackageImages = {
+    imageIds: [],
+    storagePaths: [],
+    warnings: [],
+  }
 
   try {
     const input = warehousePackageInputSchema.parse(await request.json())
@@ -66,6 +79,7 @@ export async function POST(request: Request) {
       .single()
 
     if (error) throw new Error(error.message)
+    packageId = data.id
 
     const { error: linkError } = await auth.supabase.rpc(
       'replace_warehouse_package_purchases',
@@ -74,18 +88,32 @@ export async function POST(request: Request) {
         p_purchase_ids: input.purchaseIds,
       },
     )
+    if (linkError) throw new Error(linkError.message)
 
-    if (linkError) {
-      await auth.supabase.from('warehouse_packages').delete().eq('id', data.id)
-      throw new Error(linkError.message)
-    }
+    archived = await archiveWarehousePackageImages({
+      userId: auth.user.id,
+      packageId: data.id,
+      stagedImages: input.stagedImages,
+    })
 
     revalidatePath('/warehouse-packages')
+    revalidatePath(`/warehouse-packages/${data.id}`)
     revalidatePath('/purchases')
     for (const purchaseId of input.purchaseIds) revalidatePath(`/purchases/${purchaseId}`)
 
-    return NextResponse.json({ id: data.id }, { status: 201 })
+    return NextResponse.json(
+      { id: data.id, warnings: archived.warnings },
+      { status: 201 },
+    )
   } catch (error) {
+    if (packageId) {
+      await rollbackArchivedWarehousePackageImages(auth.user.id, packageId, archived)
+      await auth.supabase
+        .from('warehouse_packages')
+        .delete()
+        .eq('id', packageId)
+        .eq('user_id', auth.user.id)
+    }
     return errorResponse(error, 'Das OLAEET-Paket konnte nicht gespeichert werden.')
   }
 }
