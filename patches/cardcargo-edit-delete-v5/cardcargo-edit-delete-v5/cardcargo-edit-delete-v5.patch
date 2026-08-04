@@ -1,0 +1,720 @@
+diff -ruN '--exclude=node_modules' '--exclude=.next' '--exclude=tsconfig.tsbuildinfo' a/app/(app)/purchases/[id]/edit/page.tsx b/app/(app)/purchases/[id]/edit/page.tsx
+--- a/app/(app)/purchases/[id]/edit/page.tsx	1970-01-01 00:00:00.000000000 +0000
++++ b/app/(app)/purchases/[id]/edit/page.tsx	2026-08-04 07:54:00.238152255 +0000
+@@ -0,0 +1,43 @@
++import Link from 'next/link'
++import type { Metadata } from 'next'
++import { notFound } from 'next/navigation'
++import { PurchaseEditForm } from '@/components/purchase-edit-form'
++import { requireUser } from '@/lib/auth'
++import type { PurchaseRow } from '@/lib/types'
++
++export const metadata: Metadata = { title: 'Einkauf bearbeiten' }
++export const dynamic = 'force-dynamic'
++
++export default async function EditPurchasePage({ params }: { params: Promise<{ id: string }> }) {
++  const { id } = await params
++  const { supabase } = await requireUser()
++  const { data, error } = await supabase
++    .from('purchases')
++    .select(
++      'id, source, source_listing_id, listing_url, canonical_url, title, description, seller_name, price_amount, price_currency, domestic_shipping_amount, service_fee_amount, purchased_at, status, created_at, updated_at',
++    )
++    .eq('id', id)
++    .single()
++
++  if (error || !data) notFound()
++  const purchase = data as unknown as PurchaseRow
++
++  return (
++    <div className="page-stack">
++      <div className="breadcrumb-row">
++        <Link href={`/purchases/${purchase.id}`}>← Einkaufsdetails</Link>
++        <span>Bunjang {purchase.source_listing_id ? `#${purchase.source_listing_id}` : ''}</span>
++      </div>
++
++      <header className="page-header compact">
++        <div>
++          <span className="eyebrow">Einkaufsdatensatz</span>
++          <h1>Einkauf bearbeiten</h1>
++          <p>Kaufdaten korrigieren oder den Bearbeitungsstand aktualisieren.</p>
++        </div>
++      </header>
++
++      <PurchaseEditForm purchase={purchase} />
++    </div>
++  )
++}
+diff -ruN '--exclude=node_modules' '--exclude=.next' '--exclude=tsconfig.tsbuildinfo' a/app/(app)/purchases/[id]/page.tsx b/app/(app)/purchases/[id]/page.tsx
+--- a/app/(app)/purchases/[id]/page.tsx	2026-08-03 08:03:57.000000000 +0000
++++ b/app/(app)/purchases/[id]/page.tsx	2026-08-04 07:54:32.290153094 +0000
+@@ -2,6 +2,7 @@
+ import type { Metadata } from 'next'
+ import { notFound } from 'next/navigation'
+ import { StatusBadge } from '@/components/status-badge'
++import { DeletePurchaseButton } from '@/components/delete-purchase-button'
+ import { formatDate, formatMoney } from '@/lib/format'
+ import { requireUser } from '@/lib/auth'
+ import { createSignedImageUrl } from '@/lib/storage'
+@@ -15,7 +16,7 @@
+   searchParams,
+ }: {
+   params: Promise<{ id: string }>
+-  searchParams: Promise<{ created?: string; warnings?: string }>
++  searchParams: Promise<{ created?: string; updated?: string; warnings?: string }>
+ }) {
+   const { id } = await params
+   const query = await searchParams
+@@ -56,6 +57,10 @@
+         </div>
+       ) : null}
+ 
++      {query.updated === '1' ? (
++        <div className="alert alert-success">Der Einkauf wurde erfolgreich aktualisiert.</div>
++      ) : null}
++
+       {warningCount > 0 ? (
+         <div className="alert alert-warning">
+           {warningCount} Importhinweis{warningCount === 1 ? '' : 'e'}: Mindestens eine erkannte oder hochgeladene Bilddatei wurde übersprungen oder bereinigt.
+@@ -79,11 +84,14 @@
+           <strong>
+             {formatMoney(purchase.domestic_shipping_amount, purchase.price_currency)}
+           </strong>
+-          <span>Artikel + Versand</span>
++          <span>Service-/Zahlungsgebühren</span>
++          <strong>{formatMoney(purchase.service_fee_amount, purchase.price_currency)}</strong>
++          <span>Gesamtsumme</span>
+           <strong>
+             {formatMoney(
+               Number(purchase.price_amount || 0) +
+-                Number(purchase.domestic_shipping_amount || 0),
++                Number(purchase.domestic_shipping_amount || 0) +
++                Number(purchase.service_fee_amount || 0),
+               purchase.price_currency,
+             )}
+           </strong>
+@@ -95,6 +103,12 @@
+           >
+             Originalangebot öffnen ↗
+           </a>
++          <div className="detail-actions">
++            <Link className="button button-primary" href={`/purchases/${purchase.id}/edit`}>
++              Bearbeiten
++            </Link>
++            <DeletePurchaseButton purchaseId={purchase.id} title={purchase.title} />
++          </div>
+         </div>
+       </header>
+ 
+@@ -152,6 +166,10 @@
+               </dd>
+             </div>
+             <div>
++              <dt>Service-/Zahlungsgebühren</dt>
++              <dd>{formatMoney(purchase.service_fee_amount, purchase.price_currency)}</dd>
++            </div>
++            <div>
+               <dt>Erfasst am</dt>
+               <dd>{formatDate(purchase.created_at)}</dd>
+             </div>
+diff -ruN '--exclude=node_modules' '--exclude=.next' '--exclude=tsconfig.tsbuildinfo' a/app/(app)/purchases/page.tsx b/app/(app)/purchases/page.tsx
+--- a/app/(app)/purchases/page.tsx	2026-07-30 17:26:56.000000000 +0000
++++ b/app/(app)/purchases/page.tsx	2026-08-04 07:54:32.290153094 +0000
+@@ -8,7 +8,13 @@
+ export const metadata: Metadata = { title: 'Einkäufe' }
+ export const dynamic = 'force-dynamic'
+ 
+-export default async function PurchasesPage() {
++export default async function PurchasesPage({
++  searchParams,
++}: {
++  searchParams: Promise<{ deleted?: string; cleanup?: string }>
++}) {
++  const query = await searchParams
++  const cleanupWarnings = Math.max(0, Number.parseInt(query.cleanup || '0', 10) || 0)
+   const { supabase } = await requireUser()
+   const { data } = await supabase
+     .from('purchases')
+@@ -35,6 +41,16 @@
+         </Link>
+       </header>
+ 
++      {query.deleted === '1' ? (
++        <div className="alert alert-success">Der Einkauf wurde erfolgreich gelöscht.</div>
++      ) : null}
++
++      {cleanupWarnings > 0 ? (
++        <div className="alert alert-warning">
++          Der Datensatz wurde gelöscht, aber mindestens eine Bilddatei konnte nicht automatisch aus dem Storage entfernt werden.
++        </div>
++      ) : null}
++
+       <section className="panel">
+         <PurchaseList purchases={purchases} />
+       </section>
+diff -ruN '--exclude=node_modules' '--exclude=.next' '--exclude=tsconfig.tsbuildinfo' a/app/api/purchases/[id]/route.ts b/app/api/purchases/[id]/route.ts
+--- a/app/api/purchases/[id]/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/app/api/purchases/[id]/route.ts	2026-08-04 07:54:00.242152255 +0000
+@@ -0,0 +1,132 @@
++import { NextResponse } from 'next/server'
++import { revalidatePath } from 'next/cache'
++import { z } from 'zod'
++import { getApiUser } from '@/lib/auth'
++import { updatePurchaseSchema } from '@/lib/importer/schema'
++import { hasTrustedRequestOrigin } from '@/lib/request-security'
++import { createAdminClient } from '@/lib/supabase/admin'
++
++export const runtime = 'nodejs'
++export const dynamic = 'force-dynamic'
++
++const BUCKET = 'listing-images'
++const purchaseIdSchema = z.string().uuid('Ungültige Einkaufs-ID.')
++
++type RouteContext = { params: Promise<{ id: string }> }
++
++function errorResponse(error: unknown, fallback: string) {
++  if (error instanceof z.ZodError) {
++    return NextResponse.json(
++      { error: error.issues[0]?.message || fallback },
++      { status: 422 },
++    )
++  }
++
++  return NextResponse.json(
++    { error: error instanceof Error ? error.message : fallback },
++    { status: 400 },
++  )
++}
++
++export async function PATCH(request: Request, context: RouteContext) {
++  if (!hasTrustedRequestOrigin(request)) {
++    return NextResponse.json({ error: 'Anfrage von fremder Origin blockiert.' }, { status: 403 })
++  }
++
++  const auth = await getApiUser()
++  if (!auth.user) return NextResponse.json({ error: auth.error }, { status: auth.status })
++
++  try {
++    const { id: rawId } = await context.params
++    const id = purchaseIdSchema.parse(rawId)
++    const input = updatePurchaseSchema.parse(await request.json())
++    const admin = createAdminClient()
++
++    const { data, error } = await admin
++      .from('purchases')
++      .update({
++        title: input.title,
++        description: input.description || null,
++        seller_name: input.sellerName || null,
++        price_amount: input.priceAmount,
++        domestic_shipping_amount: input.domesticShippingAmount,
++        service_fee_amount: input.serviceFeeAmount,
++        price_currency: input.priceCurrency,
++        purchased_at: input.purchasedAt || null,
++        status: input.status,
++      })
++      .eq('id', id)
++      .eq('user_id', auth.user.id)
++      .select('id')
++      .maybeSingle()
++
++    if (error) throw new Error(error.message)
++    if (!data) return NextResponse.json({ error: 'Einkauf nicht gefunden.' }, { status: 404 })
++
++    revalidatePath('/purchases')
++    revalidatePath(`/purchases/${id}`)
++    revalidatePath(`/purchases/${id}/edit`)
++
++    return NextResponse.json({ id })
++  } catch (error) {
++    return errorResponse(error, 'Der Einkauf konnte nicht aktualisiert werden.')
++  }
++}
++
++export async function DELETE(request: Request, context: RouteContext) {
++  if (!hasTrustedRequestOrigin(request)) {
++    return NextResponse.json({ error: 'Anfrage von fremder Origin blockiert.' }, { status: 403 })
++  }
++
++  const auth = await getApiUser()
++  if (!auth.user) return NextResponse.json({ error: auth.error }, { status: auth.status })
++
++  try {
++    const { id: rawId } = await context.params
++    const id = purchaseIdSchema.parse(rawId)
++    const admin = createAdminClient()
++
++    const { data: purchase, error: readError } = await admin
++      .from('purchases')
++      .select('id, purchase_images(storage_path)')
++      .eq('id', id)
++      .eq('user_id', auth.user.id)
++      .maybeSingle()
++
++    if (readError) throw new Error(readError.message)
++    if (!purchase) return NextResponse.json({ error: 'Einkauf nicht gefunden.' }, { status: 404 })
++
++    const images = (purchase.purchase_images ?? []) as Array<{ storage_path: string }>
++    const storagePaths = images
++      .map((image) => image.storage_path)
++      .filter((path) => path.startsWith(`${auth.user.id}/purchases/${id}/`))
++
++    const { data: deleted, error: deleteError } = await admin
++      .from('purchases')
++      .delete()
++      .eq('id', id)
++      .eq('user_id', auth.user.id)
++      .select('id')
++      .maybeSingle()
++
++    if (deleteError) throw new Error(deleteError.message)
++    if (!deleted) return NextResponse.json({ error: 'Einkauf nicht gefunden.' }, { status: 404 })
++
++    const warnings: string[] = []
++    if (storagePaths.length) {
++      const { error: storageError } = await admin.storage.from(BUCKET).remove(storagePaths)
++      if (storageError) {
++        warnings.push(
++          'Der Einkauf wurde gelöscht, aber mindestens eine archivierte Bilddatei konnte nicht automatisch bereinigt werden.',
++        )
++      }
++    }
++
++    revalidatePath('/purchases')
++    revalidatePath(`/purchases/${id}`)
++
++    return NextResponse.json({ id, warnings })
++  } catch (error) {
++    return errorResponse(error, 'Der Einkauf konnte nicht gelöscht werden.')
++  }
++}
+diff -ruN '--exclude=node_modules' '--exclude=.next' '--exclude=tsconfig.tsbuildinfo' a/app/globals.css b/app/globals.css
+--- a/app/globals.css	2026-07-30 17:55:53.000000000 +0000
++++ b/app/globals.css	2026-08-04 07:54:32.418153097 +0000
+@@ -1121,3 +1121,83 @@
+     padding: 28px 22px;
+   }
+ }
++
++.button-danger {
++  color: #fff;
++  background: var(--danger);
++  box-shadow: 0 8px 20px rgba(180, 35, 24, 0.16);
++}
++
++.button-danger:hover:not(:disabled) {
++  background: #941d14;
++}
++
++.detail-actions,
++.form-actions {
++  display: flex;
++  flex-wrap: wrap;
++  justify-content: flex-end;
++  gap: 10px;
++}
++
++.delete-action {
++  display: flex;
++  flex-direction: column;
++  align-items: flex-end;
++  gap: 6px;
++}
++
++.inline-error {
++  max-width: 320px;
++  color: var(--danger);
++  font-size: 0.75rem;
++  text-align: right;
++}
++
++.form-actions {
++  position: sticky;
++  bottom: 16px;
++  z-index: 3;
++  padding: 16px 18px;
++  border: 1px solid rgba(210, 212, 221, 0.9);
++  border-radius: 16px;
++  background: rgba(255, 255, 255, 0.92);
++  box-shadow: var(--shadow);
++  backdrop-filter: blur(16px);
++}
++
++.provenance-panel {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 18px;
++}
++
++.provenance-panel .section-label {
++  margin-bottom: 3px;
++}
++
++@media (max-width: 620px) {
++  .detail-actions,
++  .form-actions,
++  .provenance-panel {
++    align-items: stretch;
++    flex-direction: column;
++  }
++
++  .detail-actions .button,
++  .delete-action,
++  .delete-action .button,
++  .form-actions .button {
++    width: 100%;
++  }
++
++  .delete-action {
++    align-items: stretch;
++  }
++
++  .inline-error {
++    max-width: none;
++    text-align: left;
++  }
++}
+diff -ruN '--exclude=node_modules' '--exclude=.next' '--exclude=tsconfig.tsbuildinfo' a/components/delete-purchase-button.tsx b/components/delete-purchase-button.tsx
+--- a/components/delete-purchase-button.tsx	1970-01-01 00:00:00.000000000 +0000
++++ b/components/delete-purchase-button.tsx	2026-08-04 07:54:00.238152255 +0000
+@@ -0,0 +1,47 @@
++'use client'
++
++import { useState } from 'react'
++import { useRouter } from 'next/navigation'
++
++export function DeletePurchaseButton({ purchaseId, title }: { purchaseId: string; title: string }) {
++  const router = useRouter()
++  const [deleting, setDeleting] = useState(false)
++  const [message, setMessage] = useState<string | null>(null)
++
++  async function removePurchase() {
++    const confirmed = window.confirm(
++      `„${title}“ wirklich löschen?\n\nDer Einkauf, seine Positionen, Paketzuordnungen und archivierten Bilder werden entfernt. Dieser Vorgang kann nicht rückgängig gemacht werden.`,
++    )
++    if (!confirmed) return
++
++    setDeleting(true)
++    setMessage(null)
++
++    try {
++      const response = await fetch(`/api/purchases/${purchaseId}`, { method: 'DELETE' })
++      const result = (await response.json()) as { error?: string; warnings?: string[] }
++      if (!response.ok) throw new Error(result.error || 'Der Einkauf konnte nicht gelöscht werden.')
++
++      const cleanupWarnings = result.warnings?.length ?? 0
++      router.push(`/purchases?deleted=1${cleanupWarnings ? `&cleanup=${cleanupWarnings}` : ''}`)
++      router.refresh()
++    } catch (error) {
++      setMessage(error instanceof Error ? error.message : 'Der Einkauf konnte nicht gelöscht werden.')
++      setDeleting(false)
++    }
++  }
++
++  return (
++    <div className="delete-action">
++      <button
++        className="button button-danger"
++        type="button"
++        onClick={removePurchase}
++        disabled={deleting}
++      >
++        {deleting ? 'Löscht …' : 'Einkauf löschen'}
++      </button>
++      {message ? <span className="inline-error">{message}</span> : null}
++    </div>
++  )
++}
+diff -ruN '--exclude=node_modules' '--exclude=.next' '--exclude=tsconfig.tsbuildinfo' a/components/purchase-edit-form.tsx b/components/purchase-edit-form.tsx
+--- a/components/purchase-edit-form.tsx	1970-01-01 00:00:00.000000000 +0000
++++ b/components/purchase-edit-form.tsx	2026-08-04 07:54:00.238152255 +0000
+@@ -0,0 +1,204 @@
++'use client'
++
++import Link from 'next/link'
++import { useState, type FormEvent } from 'react'
++import { useRouter } from 'next/navigation'
++import { purchaseStatusLabels } from '@/lib/format'
++import type { PurchaseRow, PurchaseStatus } from '@/lib/types'
++
++const purchaseStatuses = Object.keys(purchaseStatusLabels) as PurchaseStatus[]
++
++function numberOrNull(value: FormDataEntryValue | null) {
++  const normalized = String(value ?? '').trim()
++  if (!normalized) return null
++  const parsed = Number(normalized)
++  return Number.isFinite(parsed) ? parsed : Number.NaN
++}
++
++export function PurchaseEditForm({ purchase }: { purchase: PurchaseRow }) {
++  const router = useRouter()
++  const [submitting, setSubmitting] = useState(false)
++  const [message, setMessage] = useState<string | null>(null)
++
++  async function submit(event: FormEvent<HTMLFormElement>) {
++    event.preventDefault()
++    setSubmitting(true)
++    setMessage(null)
++
++    try {
++      const form = new FormData(event.currentTarget)
++      const priceAmount = numberOrNull(form.get('priceAmount'))
++      const domesticShippingAmount = numberOrNull(form.get('domesticShippingAmount'))
++      const serviceFeeAmount = numberOrNull(form.get('serviceFeeAmount'))
++
++      if ([priceAmount, domesticShippingAmount, serviceFeeAmount].some(Number.isNaN)) {
++        throw new Error('Preis- und Kostenfelder müssen gültige Zahlen enthalten.')
++      }
++
++      const response = await fetch(`/api/purchases/${purchase.id}`, {
++        method: 'PATCH',
++        headers: { 'content-type': 'application/json' },
++        body: JSON.stringify({
++          title: String(form.get('title') ?? ''),
++          description: String(form.get('description') ?? ''),
++          sellerName: String(form.get('sellerName') ?? ''),
++          priceAmount,
++          domesticShippingAmount,
++          serviceFeeAmount,
++          priceCurrency: String(form.get('priceCurrency') ?? 'KRW'),
++          purchasedAt: String(form.get('purchasedAt') ?? '').trim() || null,
++          status: String(form.get('status') ?? 'ordered'),
++        }),
++      })
++
++      const result = (await response.json()) as { error?: string }
++      if (!response.ok) throw new Error(result.error || 'Der Einkauf konnte nicht aktualisiert werden.')
++
++      router.push(`/purchases/${purchase.id}?updated=1`)
++      router.refresh()
++    } catch (error) {
++      setMessage(error instanceof Error ? error.message : 'Der Einkauf konnte nicht aktualisiert werden.')
++      setSubmitting(false)
++    }
++  }
++
++  return (
++    <form className="page-stack" onSubmit={submit}>
++      {message ? <div className="alert alert-error">{message}</div> : null}
++
++      <section className="panel">
++        <div className="panel-heading">
++          <div>
++            <h2>Einkaufsdaten</h2>
++            <p>Die Angebots-URL und bereits archivierten Bilder bleiben unverändert.</p>
++          </div>
++        </div>
++
++        <div className="form-grid two-columns">
++          <label className="field-wide">
++            Titel
++            <input
++              name="title"
++              type="text"
++              required
++              maxLength={300}
++              defaultValue={purchase.title}
++            />
++          </label>
++
++          <label>
++            Verkäufer
++            <input
++              name="sellerName"
++              type="text"
++              maxLength={200}
++              defaultValue={purchase.seller_name ?? ''}
++            />
++          </label>
++
++          <label>
++            Kaufdatum
++            <input name="purchasedAt" type="date" defaultValue={purchase.purchased_at ?? ''} />
++          </label>
++
++          <label>
++            Artikelpreis
++            <input
++              name="priceAmount"
++              type="number"
++              min="0"
++              max="999999999999"
++              step="0.01"
++              inputMode="decimal"
++              defaultValue={purchase.price_amount ?? ''}
++            />
++          </label>
++
++          <label>
++            Versandkosten in Korea
++            <input
++              name="domesticShippingAmount"
++              type="number"
++              min="0"
++              max="999999999999"
++              step="0.01"
++              inputMode="decimal"
++              defaultValue={purchase.domestic_shipping_amount ?? ''}
++            />
++          </label>
++
++          <label>
++            Service-/Zahlungsgebühren
++            <input
++              name="serviceFeeAmount"
++              type="number"
++              min="0"
++              max="999999999999"
++              step="0.01"
++              inputMode="decimal"
++              defaultValue={purchase.service_fee_amount ?? ''}
++            />
++          </label>
++
++          <label>
++            Währung
++            <input
++              name="priceCurrency"
++              type="text"
++              required
++              minLength={3}
++              maxLength={3}
++              defaultValue={purchase.price_currency}
++              autoCapitalize="characters"
++            />
++          </label>
++
++          <label>
++            Status
++            <select name="status" defaultValue={purchase.status}>
++              {purchaseStatuses.map((status) => (
++                <option key={status} value={status}>
++                  {purchaseStatusLabels[status]}
++                </option>
++              ))}
++            </select>
++          </label>
++
++          <label className="field-wide">
++            Beschreibung / Notizen
++            <textarea
++              name="description"
++              rows={8}
++              maxLength={10_000}
++              defaultValue={purchase.description ?? ''}
++            />
++          </label>
++        </div>
++      </section>
++
++      <section className="panel provenance-panel">
++        <div>
++          <span className="section-label">Importquelle</span>
++          <strong>Bunjang {purchase.source_listing_id ? `#${purchase.source_listing_id}` : ''}</strong>
++        </div>
++        <a
++          className="text-link"
++          href={purchase.canonical_url || purchase.listing_url}
++          target="_blank"
++          rel="noreferrer"
++        >
++          Originalangebot öffnen ↗
++        </a>
++      </section>
++
++      <div className="form-actions">
++        <Link className="button button-secondary" href={`/purchases/${purchase.id}`}>
++          Abbrechen
++        </Link>
++        <button className="button button-primary" type="submit" disabled={submitting}>
++          {submitting ? 'Speichert …' : 'Änderungen speichern'}
++        </button>
++      </div>
++    </form>
++  )
++}
+diff -ruN '--exclude=node_modules' '--exclude=.next' '--exclude=tsconfig.tsbuildinfo' a/lib/importer/schema.ts b/lib/importer/schema.ts
+--- a/lib/importer/schema.ts	2026-08-03 08:03:57.000000000 +0000
++++ b/lib/importer/schema.ts	2026-08-04 07:54:32.290153094 +0000
+@@ -66,3 +66,30 @@
+       })
+     }
+   })
++
++
++export const updatePurchaseSchema = z.object({
++  title: z.string().trim().min(1).max(300),
++  description: z.string().max(10_000).default(''),
++  sellerName: z.string().trim().max(200).default(''),
++  priceAmount: z.number().nonnegative().max(999_999_999_999).nullable(),
++  domesticShippingAmount: z.number().nonnegative().max(999_999_999_999).nullable(),
++  serviceFeeAmount: z.number().nonnegative().max(999_999_999_999).nullable(),
++  priceCurrency: z
++    .string()
++    .trim()
++    .length(3)
++    .transform((value) => value.toUpperCase()),
++  purchasedAt: dateOnlySchema.nullable(),
++  status: z.enum([
++    'planned',
++    'ordered',
++    'paid',
++    'shipped_domestic',
++    'warehouse_received',
++    'consolidated',
++    'international_transit',
++    'delivered',
++    'cancelled',
++  ]),
++})
+diff -ruN '--exclude=node_modules' '--exclude=.next' '--exclude=tsconfig.tsbuildinfo' a/tests/schema.test.ts b/tests/schema.test.ts
+--- a/tests/schema.test.ts	2026-07-30 17:52:40.000000000 +0000
++++ b/tests/schema.test.ts	2026-08-04 07:54:32.290153094 +0000
+@@ -1,5 +1,5 @@
+ import { describe, expect, it } from 'vitest'
+-import { createPurchaseSchema } from '@/lib/importer/schema'
++import { createPurchaseSchema, updatePurchaseSchema } from '@/lib/importer/schema'
+ 
+ const basePurchase = {
+   source: 'bunjang' as const,
+@@ -44,3 +44,39 @@
+     expect(parsed.success).toBe(false)
+   })
+ })
++
++
++describe('updatePurchaseSchema', () => {
++  it('normalizes the currency and accepts nullable costs', () => {
++    const parsed = updatePurchaseSchema.parse({
++      title: 'Updated purchase',
++      description: 'Corrected notes',
++      sellerName: 'Seller',
++      priceAmount: 50_000,
++      domesticShippingAmount: 4_000,
++      serviceFeeAmount: null,
++      priceCurrency: 'krw',
++      purchasedAt: '2026-08-04',
++      status: 'paid',
++    })
++
++    expect(parsed.priceCurrency).toBe('KRW')
++    expect(parsed.domesticShippingAmount).toBe(4_000)
++  })
++
++  it('rejects an empty title and negative costs', () => {
++    const parsed = updatePurchaseSchema.safeParse({
++      title: '   ',
++      description: '',
++      sellerName: '',
++      priceAmount: -1,
++      domesticShippingAmount: null,
++      serviceFeeAmount: null,
++      priceCurrency: 'KRW',
++      purchasedAt: null,
++      status: 'ordered',
++    })
++
++    expect(parsed.success).toBe(false)
++  })
++})
