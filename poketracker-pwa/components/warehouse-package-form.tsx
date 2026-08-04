@@ -323,7 +323,7 @@ export function WarehousePackageForm({
         <div className="panel-heading">
           <div>
             <h2>Enthaltene Einkäufe</h2>
-            <p>Ordne die bereits in CardCargo erfassten Bunjang-Einkäufe zu.</p>
+            <p>Es werden nur unzugeordnete Einkäufe und die bereits in diesem Paket enthaltenen Einkäufe angezeigt.</p>
           </div>
           <span className="panel-note">{purchases.length} verfügbar</span>
         </div>
@@ -350,7 +350,7 @@ export function WarehousePackageForm({
           </div>
         ) : (
           <div className="empty-state compact-empty">
-            <p>Noch keine Einkäufe vorhanden. Das Paket kann trotzdem gespeichert werden.</p>
+            <p>Keine zuweisbaren Einkäufe vorhanden. Bereits anderen OLAEET-Paketen zugeordnete Einkäufe werden hier nicht angezeigt.</p>
           </div>
         )}
       </section>

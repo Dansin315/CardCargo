@@ -3,9 +3,12 @@ import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { WarehousePackageForm } from '@/components/warehouse-package-form'
 import { requireUser } from '@/lib/auth'
-import type {
-  PackagePurchaseChoice,
-  WarehousePackageRow,
+import {
+  filterAssignablePurchases,
+  selectedPurchaseIdsForPackage,
+  type PackagePurchaseChoice,
+  type WarehousePackagePurchaseLink,
+  type WarehousePackageRow,
 } from '@/lib/warehouse-packages'
 
 export const metadata: Metadata = { title: 'OLAEET-Paket bearbeiten' }
@@ -32,11 +35,19 @@ export default async function EditWarehousePackagePage({
       .order('created_at', { ascending: false }),
     supabase
       .from('warehouse_package_purchases')
-      .select('purchase_id')
-      .eq('warehouse_package_id', id),
+      .select('purchase_id, warehouse_package_id'),
   ])
 
   if (packageResult.error || !packageResult.data) notFound()
+  if (purchasesResult.error) throw new Error(purchasesResult.error.message)
+  if (linksResult.error) throw new Error(linksResult.error.message)
+
+  const links = (linksResult.data ?? []) as unknown as WarehousePackagePurchaseLink[]
+  const purchases = filterAssignablePurchases(
+    (purchasesResult.data ?? []) as unknown as PackagePurchaseChoice[],
+    links,
+    id,
+  )
 
   return (
     <div className="page-stack">
@@ -54,8 +65,8 @@ export default async function EditWarehousePackagePage({
       <WarehousePackageForm
         mode="edit"
         packageData={packageResult.data as unknown as WarehousePackageRow}
-        purchases={(purchasesResult.data ?? []) as unknown as PackagePurchaseChoice[]}
-        selectedPurchaseIds={(linksResult.data ?? []).map((link) => link.purchase_id)}
+        purchases={purchases}
+        selectedPurchaseIds={selectedPurchaseIdsForPackage(links, id)}
       />
     </div>
   )

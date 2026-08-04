@@ -61,6 +61,38 @@ export interface PackagePurchaseChoice {
   status: string
 }
 
+export interface WarehousePackagePurchaseLink {
+  purchase_id: string
+  warehouse_package_id: string
+}
+
+/**
+ * A purchase may belong to only one OLAEET package at a time.
+ * On an edit page, purchases already linked to the current package remain visible.
+ */
+export function filterAssignablePurchases(
+  purchases: PackagePurchaseChoice[],
+  links: WarehousePackagePurchaseLink[],
+  currentPackageId?: string,
+) {
+  const assignedToAnotherPackage = new Set(
+    links
+      .filter((link) => link.warehouse_package_id !== currentPackageId)
+      .map((link) => link.purchase_id),
+  )
+
+  return purchases.filter((purchase) => !assignedToAnotherPackage.has(purchase.id))
+}
+
+export function selectedPurchaseIdsForPackage(
+  links: WarehousePackagePurchaseLink[],
+  packageId: string,
+) {
+  return links
+    .filter((link) => link.warehouse_package_id === packageId)
+    .map((link) => link.purchase_id)
+}
+
 export function isValidDateOnly(value: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
   const [year, month, day] = value.split('-').map(Number)
