@@ -10,10 +10,9 @@ const validInput = {
   packageDescription: 'Pokemon cards',
   providerStatus: 'Arrived',
   status: 'received',
-  arrivedAt: '2026-08-05T10:00:00.000Z',
+  arrivedAt: '2026-08-05',
   inspectedAt: null,
   storageStartedAt: null,
-  storageDeadlineAt: null,
   weightGrams: 250,
   lengthCm: 20,
   widthCm: 15,
@@ -48,12 +47,27 @@ describe('warehousePackageInputSchema', () => {
     expect(result.success).toBe(false)
   })
 
-  it('rejects a storage deadline before storage start', () => {
+  it('calculates the storage deadline 80 days after arrival', () => {
+    expect(warehousePackageInputSchema.parse(validInput)).toMatchObject({
+      arrivedAt: '2026-08-05',
+      storageDeadlineAt: '2026-10-24',
+    })
+  })
+
+  it('rejects timestamps because package events are date-only', () => {
     const result = warehousePackageInputSchema.safeParse({
       ...validInput,
-      storageStartedAt: '2026-08-10T10:00:00.000Z',
-      storageDeadlineAt: '2026-08-09T10:00:00.000Z',
+      arrivedAt: '2026-08-05T10:00:00.000Z',
     })
     expect(result.success).toBe(false)
+  })
+
+  it('ignores a submitted deadline and recalculates it from arrival', () => {
+    expect(
+      warehousePackageInputSchema.parse({
+        ...validInput,
+        storageDeadlineAt: '2099-01-01',
+      }),
+    ).toMatchObject({ storageDeadlineAt: '2026-10-24' })
   })
 })

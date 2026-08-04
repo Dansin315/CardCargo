@@ -4,9 +4,11 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState, type FormEvent } from 'react'
 import {
+  addDaysToDate,
+  isValidDateOnly,
   packageStatusLabels,
   packageStatuses,
-  toDateTimeLocal,
+  toDateInput,
   type PackagePurchaseChoice,
   type WarehousePackageRow,
 } from '@/lib/warehouse-packages'
@@ -30,11 +32,10 @@ function textOrNull(value: FormDataEntryValue | null) {
   return normalized || null
 }
 
-function dateTimeOrNull(value: FormDataEntryValue | null) {
+function dateOrNull(value: FormDataEntryValue | null) {
   const normalized = String(value ?? '').trim()
   if (!normalized) return null
-  const date = new Date(normalized)
-  return Number.isNaN(date.getTime()) ? 'invalid' : date.toISOString()
+  return isValidDateOnly(normalized) ? normalized : 'invalid'
 }
 
 export function WarehousePackageForm({
@@ -46,6 +47,8 @@ export function WarehousePackageForm({
   const router = useRouter()
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  const [arrivedAt, setArrivedAt] = useState(toDateInput(packageData?.arrived_at))
+  const storageDeadlineAt = addDaysToDate(arrivedAt, 80)
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -65,13 +68,12 @@ export function WarehousePackageForm({
       }
 
       const dateValues = {
-        arrivedAt: dateTimeOrNull(form.get('arrivedAt')),
-        inspectedAt: dateTimeOrNull(form.get('inspectedAt')),
-        storageStartedAt: dateTimeOrNull(form.get('storageStartedAt')),
-        storageDeadlineAt: dateTimeOrNull(form.get('storageDeadlineAt')),
+        arrivedAt: dateOrNull(form.get('arrivedAt')),
+        inspectedAt: dateOrNull(form.get('inspectedAt')),
+        storageStartedAt: dateOrNull(form.get('storageStartedAt')),
       }
       if (Object.values(dateValues).includes('invalid')) {
-        throw new Error('Mindestens ein Datum oder eine Uhrzeit ist ungültig.')
+        throw new Error('Mindestens ein Datum ist ungültig.')
       }
 
       const purchaseIds = form.getAll('purchaseIds').map(String)
@@ -214,7 +216,7 @@ export function WarehousePackageForm({
         <div className="panel-heading">
           <div>
             <h2>Eingang, Inspektion und Lagerung</h2>
-            <p>Zeitpunkte sowie von OLAEET gemessene Paketdaten.</p>
+            <p>Kalendertage sowie von OLAEET gemessene Paketdaten.</p>
           </div>
         </div>
         <div className="form-grid two-columns">
@@ -222,33 +224,38 @@ export function WarehousePackageForm({
             Eingang bei OLAEET
             <input
               name="arrivedAt"
-              type="datetime-local"
-              defaultValue={toDateTimeLocal(packageData?.arrived_at)}
+              type="date"
+              value={arrivedAt}
+              onChange={(event) => setArrivedAt(event.target.value)}
             />
           </label>
           <label>
-            Inspektionszeitpunkt
+            Inspektionsdatum
             <input
               name="inspectedAt"
-              type="datetime-local"
-              defaultValue={toDateTimeLocal(packageData?.inspected_at)}
+              type="date"
+              defaultValue={toDateInput(packageData?.inspected_at)}
             />
           </label>
           <label>
             Lagerbeginn
             <input
               name="storageStartedAt"
-              type="datetime-local"
-              defaultValue={toDateTimeLocal(packageData?.storage_started_at)}
+              type="date"
+              defaultValue={toDateInput(packageData?.storage_started_at)}
             />
           </label>
           <label>
             Lagerfrist
             <input
-              name="storageDeadlineAt"
-              type="datetime-local"
-              defaultValue={toDateTimeLocal(packageData?.storage_deadline_at)}
+              type="date"
+              value={storageDeadlineAt}
+              readOnly
+              aria-describedby="storage-deadline-help"
             />
+            <small id="storage-deadline-help">
+              Automatisch: 80 Kalendertage nach dem Eingang bei OLAEET.
+            </small>
           </label>
           <label>
             Gewicht in Gramm

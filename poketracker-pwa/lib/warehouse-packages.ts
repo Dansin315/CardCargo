@@ -61,10 +61,30 @@ export interface PackagePurchaseChoice {
   status: string
 }
 
-export function toDateTimeLocal(value: string | null | undefined) {
+export function isValidDateOnly(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const [year, month, day] = value.split('-').map(Number)
+  const date = new Date(Date.UTC(year, month - 1, day))
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  )
+}
+
+export function addDaysToDate(value: string | null | undefined, days: number) {
+  if (!value || !isValidDateOnly(value) || !Number.isInteger(days)) return ''
+  const [year, month, day] = value.split('-').map(Number)
+  const date = new Date(Date.UTC(year, month - 1, day))
+  date.setUTCDate(date.getUTCDate() + days)
+  return date.toISOString().slice(0, 10)
+}
+
+export function toDateInput(value: string | null | undefined) {
   if (!value) return ''
+  if (isValidDateOnly(value)) return value
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ''
   const offset = date.getTimezoneOffset() * 60_000
-  return new Date(date.getTime() - offset).toISOString().slice(0, 16)
+  return new Date(date.getTime() - offset).toISOString().slice(0, 10)
 }

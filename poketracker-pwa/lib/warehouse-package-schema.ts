@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { packageStatuses } from '@/lib/warehouse-packages'
+import { addDaysToDate, isValidDateOnly, packageStatuses } from '@/lib/warehouse-packages'
 
 const nullableText = (maxLength: number) =>
   z
@@ -19,16 +19,17 @@ const nullableAmount = (label: string, maximum: number) =>
     .nullable()
     .default(null)
 
-const nullableDateTime = z
+const nullableDate = z
   .string()
   .trim()
   .nullable()
   .default(null)
   .refine(
-    (value) => value === null || value === '' || !Number.isNaN(Date.parse(value)),
-    'Datum oder Uhrzeit ist ungültig.',
+    (value) => value === null || value === '' || isValidDateOnly(value),
+    'Datum ist ungültig.',
   )
   .transform((value) => value || null)
+
 
 export const warehousePackageInputSchema = z
   .object({
@@ -40,10 +41,9 @@ export const warehousePackageInputSchema = z
     packageDescription: nullableText(2_000),
     providerStatus: nullableText(200),
     status: z.enum(packageStatuses),
-    arrivedAt: nullableDateTime,
-    inspectedAt: nullableDateTime,
-    storageStartedAt: nullableDateTime,
-    storageDeadlineAt: nullableDateTime,
+    arrivedAt: nullableDate,
+    inspectedAt: nullableDate,
+    storageStartedAt: nullableDate,
     weightGrams: nullableAmount('Gewicht', 1_000_000),
     lengthCm: nullableAmount('Länge', 10_000),
     widthCm: nullableAmount('Breite', 10_000),
@@ -60,17 +60,22 @@ export const warehousePackageInputSchema = z
       })
     }
 
+    const storageDeadlineAt = addDaysToDate(value.arrivedAt, 80)
     if (
       value.storageStartedAt &&
-      value.storageDeadlineAt &&
-      Date.parse(value.storageDeadlineAt) < Date.parse(value.storageStartedAt)
+      storageDeadlineAt &&
+      storageDeadlineAt < value.storageStartedAt
     ) {
       context.addIssue({
         code: 'custom',
-        path: ['storageDeadlineAt'],
-        message: 'Die Lagerfrist darf nicht vor dem Lagerbeginn liegen.',
+        path: ['storageStartedAt'],
+        message: 'Der Lagerbeginn darf nicht nach der automatisch berechneten Lagerfrist liegen.',
       })
     }
   })
+  .transform((value) => ({
+    ...value,
+    storageDeadlineAt: addDaysToDate(value.arrivedAt, 80) || null,
+  }))
 
 export type WarehousePackageInput = z.infer<typeof warehousePackageInputSchema>
