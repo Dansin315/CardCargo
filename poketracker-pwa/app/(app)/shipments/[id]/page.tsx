@@ -4,11 +4,18 @@ import { notFound } from 'next/navigation'
 import { DeleteShipmentButton } from '@/components/delete-shipment-button'
 import { requireUser } from '@/lib/auth'
 import { formatDate, formatMoney } from '@/lib/format'
+import { purchaseImageCategoryLabels } from '@/lib/purchase-image-categories'
 import {
+  loadShipmentLinkedImages,
+  loadShipmentManualImages,
+} from '@/lib/shipment-image-queries'
+import {
+  shipmentImageCategoryLabels,
   shipmentLabel,
   shipmentStatusLabels,
   shippingServiceLabels,
   totalShipmentCosts,
+  type ShipmentLinkedImageChoice,
   type ShipmentRow,
   type ShipmentWarehousePackageChoice,
 } from '@/lib/shipments'
@@ -16,6 +23,13 @@ import { packageStatusLabels } from '@/lib/warehouse-packages'
 
 export const metadata: Metadata = { title: 'Internationale Sendungsdetails' }
 export const dynamic = 'force-dynamic'
+
+function linkedImageLabel(image: ShipmentLinkedImageChoice) {
+  if (image.source === 'warehouse_package') return 'Manuelles OLAEET-Paketbild'
+  return purchaseImageCategoryLabels[
+    image.category as keyof typeof purchaseImageCategoryLabels
+  ]
+}
 
 export default async function ShipmentDetailPage({
   params,
@@ -60,6 +74,10 @@ export default async function ShipmentDetailPage({
     packages = (data ?? []) as unknown as ShipmentWarehousePackageChoice[]
   }
 
+  const [manualImages, linkedImages] = await Promise.all([
+    loadShipmentManualImages(supabase, id),
+    loadShipmentLinkedImages(supabase, packages),
+  ])
   const label = shipmentLabel(shipment)
   const costTotal = totalShipmentCosts(shipment)
 
@@ -199,6 +217,74 @@ export default async function ShipmentDetailPage({
             <Link className="button button-secondary" href={`/shipments/${id}/edit`}>
               Pakete zuordnen
             </Link>
+          </div>
+        )}
+      </section>
+
+      <section className="panel">
+        <div className="panel-heading">
+          <div>
+            <h2>Eigene Sendungsbilder</h2>
+            <p>
+              Manuell archivierte Konsolidierungs-, Karton-, Etikett-, Zoll- und Schadensbilder.
+            </p>
+          </div>
+          <span className="panel-note">{manualImages.length} Bilder</span>
+        </div>
+
+        {manualImages.length ? (
+          <div className="shipment-image-grid">
+            {manualImages.map((image) => (
+              <article className="shipment-image-card" key={image.id}>
+                {image.signed_url ? (
+                  <img src={image.signed_url} alt={image.original_filename || 'Sendungsbild'} />
+                ) : null}
+                <div>
+                  <strong>{shipmentImageCategoryLabels[image.category]}</strong>
+                  <small>{image.original_filename || 'Manuell hochgeladen'}</small>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="empty-state compact-empty">
+            <p>Für diese Sendung wurden noch keine eigenen Bilder gespeichert.</p>
+            <Link className="button button-secondary" href={`/shipments/${id}/edit`}>
+              Sendungsbilder hinzufügen
+            </Link>
+          </div>
+        )}
+      </section>
+
+      <section className="panel">
+        <div className="panel-heading">
+          <div>
+            <h2>Bilder aus enthaltenen Paketen und Einkäufen</h2>
+            <p>
+              Diese Bilder werden dynamisch eingeblendet und nicht kopiert. Wird ein OLAEET-Paket
+              aus der Sendung entfernt, verschwinden dessen Bilder hier automatisch.
+            </p>
+          </div>
+          <span className="panel-note">{linkedImages.length} Bilder</span>
+        </div>
+
+        {linkedImages.length ? (
+          <div className="shipment-image-grid">
+            {linkedImages.map((image) => (
+              <article className="shipment-image-card" key={image.id}>
+                {image.signed_url ? (
+                  <img src={image.signed_url} alt={image.original_filename || image.package_label} />
+                ) : null}
+                <div>
+                  <strong>{image.package_label}</strong>
+                  <small>{linkedImageLabel(image)}</small>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="empty-state compact-empty">
+            <p>Die enthaltenen OLAEET-Pakete besitzen derzeit keine anzeigbaren Bilder.</p>
           </div>
         )}
       </section>

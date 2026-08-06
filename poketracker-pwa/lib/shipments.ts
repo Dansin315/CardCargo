@@ -1,3 +1,4 @@
+import type { PurchaseImageCategory } from '@/lib/types'
 import type { PackageStatus } from '@/lib/warehouse-packages'
 
 export const shipmentStatuses = [
@@ -55,6 +56,26 @@ export const shippingServiceLabels: Record<ShippingService, string> = {
 export const shipmentCurrencies = ['KRW', 'USD', 'EUR'] as const
 export type ShipmentCurrency = (typeof shipmentCurrencies)[number]
 
+export const shipmentImageCategories = [
+  'general',
+  'consolidation',
+  'carton',
+  'label',
+  'customs',
+  'damage',
+] as const
+
+export type ShipmentImageCategory = (typeof shipmentImageCategories)[number]
+
+export const shipmentImageCategoryLabels: Record<ShipmentImageCategory, string> = {
+  general: 'Allgemein',
+  consolidation: 'Konsolidierung',
+  carton: 'Versandkarton',
+  label: 'Versandetikett',
+  customs: 'Zoll / Dokument',
+  damage: 'Beschädigung',
+}
+
 export function carrierForShippingService(service: ShippingService) {
   if (service.startsWith('fedex_')) return 'FedEx'
   if (service === 'ems' || service === 'ems_premium') return 'EMS'
@@ -99,6 +120,36 @@ export interface ShipmentPackageLink {
   warehouse_package_id: string
 }
 
+export interface ShipmentManualImageChoice {
+  id: string
+  original_filename: string | null
+  category: ShipmentImageCategory
+  position: number
+  signed_url: string | null
+}
+
+export type ShipmentLinkedImageSource = 'warehouse_package' | 'purchase'
+
+export interface ShipmentLinkedImageChoice {
+  id: string
+  warehouse_package_id: string
+  purchase_id: string | null
+  package_label: string
+  source: ShipmentLinkedImageSource
+  original_filename: string | null
+  category: PurchaseImageCategory | 'warehouse_package'
+  position: number
+  signed_url: string | null
+}
+
+export interface StagedShipmentImageInput {
+  path: string
+  originalName: string
+  mimeType: string
+  byteSize: number
+  category: ShipmentImageCategory
+}
+
 /**
  * A warehouse package may belong to only one international shipment at a time.
  * While editing, packages already linked to the current shipment remain selectable.
@@ -126,7 +177,20 @@ export function selectedWarehousePackageIdsForShipment(
     .map((link) => link.warehouse_package_id)
 }
 
-export function shipmentLabel(shipment: Pick<ShipmentRow, 'external_shipment_id' | 'tracking_number' | 'shipping_service'>) {
+export function filterShipmentLinkedImagesForSelection(
+  images: ShipmentLinkedImageChoice[],
+  selectedPackageIds: string[],
+) {
+  const selected = new Set(selectedPackageIds)
+  return images.filter((image) => selected.has(image.warehouse_package_id))
+}
+
+export function shipmentLabel(
+  shipment: Pick<
+    ShipmentRow,
+    'external_shipment_id' | 'tracking_number' | 'shipping_service'
+  >,
+) {
   return (
     shipment.external_shipment_id ||
     shipment.tracking_number ||
@@ -134,7 +198,12 @@ export function shipmentLabel(shipment: Pick<ShipmentRow, 'external_shipment_id'
   )
 }
 
-export function totalShipmentCosts(shipment: Pick<ShipmentRow, 'international_shipping_amount' | 'forwarding_fee_amount' | 'import_tax_amount'>) {
+export function totalShipmentCosts(
+  shipment: Pick<
+    ShipmentRow,
+    'international_shipping_amount' | 'forwarding_fee_amount' | 'import_tax_amount'
+  >,
+) {
   return (
     Number(shipment.international_shipping_amount || 0) +
     Number(shipment.forwarding_fee_amount || 0) +

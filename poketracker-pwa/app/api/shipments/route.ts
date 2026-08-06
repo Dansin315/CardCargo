@@ -3,11 +3,17 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getApiUser } from '@/lib/auth'
 import { hasTrustedRequestOrigin } from '@/lib/request-security'
+import {
+  archiveShipmentImages,
+  rollbackArchivedShipmentImages,
+  type ArchivedShipmentImages,
+} from '@/lib/shipment-images'
 import { shipmentInputSchema } from '@/lib/shipment-schema'
 import { carrierForShippingService } from '@/lib/shipments'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 
 function errorResponse(error: unknown, fallback: string) {
   if (error instanceof z.ZodError) {
@@ -21,14 +27,14 @@ function errorResponse(error: unknown, fallback: string) {
   const duplicate = /duplicate key|shipments_external_unique|shipment_packages_user_package_unique/i.test(
     message,
   )
-  const schemaMissing = /replace_shipment_packages|shipping_service|total_weight_grams/i.test(
+  const schemaMissing = /replace_shipment_packages|shipping_service|total_weight_grams|shipment_images/i.test(
     message,
   )
 
   return NextResponse.json(
     {
       error: schemaMissing
-        ? 'Die Sendungsdatenbank ist noch nicht vollständig eingerichtet. Führe die Migration 0007_international_shipments.sql in Supabase aus.'
+        ? 'Die Sendungsdatenbank ist noch nicht vollständig eingerichtet. Führe die Migrationen 0007_international_shipments.sql und 0008_shipment_images.sql in Supabase aus.'
         : duplicate
           ? 'Diese Sendung oder mindestens eines der ausgewählten OLAEET-Pakete ist bereits zugeordnet.'
           : message,
@@ -51,6 +57,11 @@ export async function POST(request: Request) {
   }
 
   let shipmentId: string | null = null
+  let archived: ArchivedShipmentImages = {
+    imageIds: [],
+    storagePaths: [],
+    warnings: [],
+  }
 
   try {
     const input = shipmentInputSchema.parse(await request.json())
@@ -86,6 +97,12 @@ export async function POST(request: Request) {
     })
     if (linkError) throw new Error(linkError.message)
 
+    archived = await archiveShipmentImages({
+      userId: auth.user.id,
+      shipmentId: data.id,
+      stagedImages: input.stagedImages,
+    })
+
     revalidatePath('/shipments')
     revalidatePath(`/shipments/${data.id}`)
     revalidatePath('/warehouse-packages')
@@ -93,9 +110,13 @@ export async function POST(request: Request) {
       revalidatePath(`/warehouse-packages/${packageId}`)
     }
 
-    return NextResponse.json({ id: data.id }, { status: 201 })
+    return NextResponse.json(
+      { id: data.id, warnings: archived.warnings },
+      { status: 201 },
+    )
   } catch (error) {
     if (shipmentId) {
+      await rollbackArchivedShipmentImages(auth.user.id, shipmentId, archived)
       await auth.supabase
         .from('shipments')
         .delete()

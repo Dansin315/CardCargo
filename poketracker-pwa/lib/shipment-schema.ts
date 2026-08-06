@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import {
   shipmentCurrencies,
+  shipmentImageCategories,
   shipmentStatuses,
   shippingServices,
 } from '@/lib/shipments'
@@ -35,6 +36,14 @@ const nullableDate = z
   )
   .transform((value) => value || null)
 
+const stagedShipmentImageSchema = z.object({
+  path: z.string().min(1).max(1_000),
+  originalName: z.string().min(1).max(500),
+  mimeType: z.enum(['image/jpeg', 'image/png', 'image/webp', 'image/gif']),
+  byteSize: z.number().int().positive().max(6 * 1024 * 1024),
+  category: z.enum(shipmentImageCategories),
+})
+
 export const shipmentInputSchema = z
   .object({
     externalShipmentId: nullableText(200),
@@ -45,7 +54,10 @@ export const shipmentInputSchema = z
     estimatedDeliveryAt: nullableDate,
     deliveredAt: nullableDate,
     totalWeightGrams: nullableAmount('Gesamtgewicht', 10_000_000),
-    internationalShippingAmount: nullableAmount('Internationale Versandkosten', 100_000_000),
+    internationalShippingAmount: nullableAmount(
+      'Internationale Versandkosten',
+      100_000_000,
+    ),
     forwardingFeeAmount: nullableAmount('OLAEET-Servicegebühren', 100_000_000),
     importTaxAmount: nullableAmount('Zoll- und Einfuhrkosten', 100_000_000),
     currency: z.enum(shipmentCurrencies),
@@ -54,6 +66,11 @@ export const shipmentInputSchema = z
       .array(z.string().uuid('Ungültige OLAEET-Paket-ID.'))
       .min(1, 'Wähle mindestens ein OLAEET-Paket aus.')
       .max(250),
+    stagedImages: z.array(stagedShipmentImageSchema).max(12).default([]),
+    removeManualImageIds: z
+      .array(z.string().uuid('Ungültige Sendungsbild-ID.'))
+      .max(100)
+      .default([]),
   })
   .superRefine((value, context) => {
     if (

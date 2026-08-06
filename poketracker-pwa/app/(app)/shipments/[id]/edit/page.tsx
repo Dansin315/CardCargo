@@ -4,6 +4,10 @@ import { notFound } from 'next/navigation'
 import { ShipmentForm } from '@/components/shipment-form'
 import { requireUser } from '@/lib/auth'
 import {
+  loadShipmentLinkedImages,
+  loadShipmentManualImages,
+} from '@/lib/shipment-image-queries'
+import {
   filterAssignableWarehousePackages,
   selectedWarehousePackageIdsForShipment,
   type ShipmentPackageLink,
@@ -20,7 +24,7 @@ export default async function EditShipmentPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = await params
-  const { supabase } = await requireUser()
+  const { supabase, user } = await requireUser()
   const [shipmentResult, packagesResult, linksResult] = await Promise.all([
     supabase
       .from('shipments')
@@ -48,6 +52,10 @@ export default async function EditShipmentPage({
     links,
     id,
   )
+  const [linkedImages, manualImages] = await Promise.all([
+    loadShipmentLinkedImages(supabase, packages),
+    loadShipmentManualImages(supabase, id),
+  ])
 
   return (
     <div className="page-stack">
@@ -59,13 +67,18 @@ export default async function EditShipmentPage({
         <div>
           <span className="eyebrow">OLAEET → Deutschland</span>
           <h1>Internationale Sendung bearbeiten</h1>
-          <p>Status, Tracking, Paketzuordnungen, Gewicht und Kosten aktualisieren.</p>
+          <p>
+            Status, Tracking, Paketzuordnungen, Bilder, Gewicht und Kosten aktualisieren.
+          </p>
         </div>
       </header>
       <ShipmentForm
         mode="edit"
+        userId={user.id}
         shipmentData={shipmentResult.data as unknown as ShipmentRow}
         packages={packages}
+        linkedImages={linkedImages}
+        manualImages={manualImages}
         selectedWarehousePackageIds={selectedWarehousePackageIdsForShipment(links, id)}
       />
     </div>

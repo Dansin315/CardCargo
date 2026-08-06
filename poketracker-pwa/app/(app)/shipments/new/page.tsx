@@ -2,6 +2,7 @@ import Link from 'next/link'
 import type { Metadata } from 'next'
 import { ShipmentForm } from '@/components/shipment-form'
 import { requireUser } from '@/lib/auth'
+import { loadShipmentLinkedImages } from '@/lib/shipment-image-queries'
 import {
   filterAssignableWarehousePackages,
   type ShipmentPackageLink,
@@ -17,7 +18,7 @@ export default async function NewShipmentPage({
   searchParams: Promise<{ package?: string }>
 }) {
   const query = await searchParams
-  const { supabase } = await requireUser()
+  const { supabase, user } = await requireUser()
   const [packagesResult, linksResult] = await Promise.all([
     supabase
       .from('warehouse_packages')
@@ -35,6 +36,7 @@ export default async function NewShipmentPage({
     (packagesResult.data ?? []) as unknown as ShipmentWarehousePackageChoice[],
     (linksResult.data ?? []) as unknown as ShipmentPackageLink[],
   )
+  const linkedImages = await loadShipmentLinkedImages(supabase, packages)
   const selectedWarehousePackageIds = packages.some(
     (warehousePackage) => warehousePackage.id === query.package,
   )
@@ -51,12 +53,17 @@ export default async function NewShipmentPage({
         <div>
           <span className="eyebrow">OLAEET → Deutschland</span>
           <h1>Internationale Sendung erfassen</h1>
-          <p>OLAEET-Pakete konsolidieren, Versanddienst auswählen und Kosten dokumentieren.</p>
+          <p>
+            OLAEET-Pakete konsolidieren, Versanddienst auswählen, Bilder und Kosten
+            dokumentieren.
+          </p>
         </div>
       </header>
       <ShipmentForm
         mode="create"
+        userId={user.id}
         packages={packages}
+        linkedImages={linkedImages}
         selectedWarehousePackageIds={selectedWarehousePackageIds}
       />
     </div>

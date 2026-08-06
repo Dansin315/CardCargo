@@ -3,11 +3,19 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getApiUser } from '@/lib/auth'
 import { hasTrustedRequestOrigin } from '@/lib/request-security'
+import {
+  archiveShipmentImages,
+  removeShipmentImages,
+  removeShipmentStoragePaths,
+  rollbackArchivedShipmentImages,
+  type ArchivedShipmentImages,
+} from '@/lib/shipment-images'
 import { shipmentInputSchema } from '@/lib/shipment-schema'
 import { carrierForShippingService } from '@/lib/shipments'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 
 const shipmentIdSchema = z.string().uuid('Ungültige Sendungs-ID.')
 type RouteContext = { params: Promise<{ id: string }> }
@@ -24,14 +32,14 @@ function errorResponse(error: unknown, fallback: string) {
   const duplicate = /duplicate key|shipments_external_unique|shipment_packages_user_package_unique/i.test(
     message,
   )
-  const schemaMissing = /replace_shipment_packages|shipping_service|total_weight_grams/i.test(
+  const schemaMissing = /replace_shipment_packages|shipping_service|total_weight_grams|shipment_images/i.test(
     message,
   )
 
   return NextResponse.json(
     {
       error: schemaMissing
-        ? 'Die Sendungsdatenbank ist noch nicht vollständig eingerichtet. Führe die Migration 0007_international_shipments.sql in Supabase aus.'
+        ? 'Die Sendungsdatenbank ist noch nicht vollständig eingerichtet. Führe die Migrationen 0007_international_shipments.sql und 0008_shipment_images.sql in Supabase aus.'
         : duplicate
           ? 'Diese Sendung oder mindestens eines der ausgewählten OLAEET-Pakete ist bereits zugeordnet.'
           : message,
@@ -53,9 +61,16 @@ export async function PATCH(request: Request, context: RouteContext) {
     return NextResponse.json({ error: auth.error }, { status: auth.status })
   }
 
+  let id = ''
+  let archived: ArchivedShipmentImages = {
+    imageIds: [],
+    storagePaths: [],
+    warnings: [],
+  }
+
   try {
     const { id: rawId } = await context.params
-    const id = shipmentIdSchema.parse(rawId)
+    id = shipmentIdSchema.parse(rawId)
     const input = shipmentInputSchema.parse(await request.json())
 
     const { data: currentShipment, error: currentShipmentError } = await auth.supabase
@@ -76,6 +91,13 @@ export async function PATCH(request: Request, context: RouteContext) {
       .eq('shipment_id', id)
       .eq('user_id', auth.user.id)
     if (oldLinksError) throw new Error(oldLinksError.message)
+
+    archived = await archiveShipmentImages({
+      userId: auth.user.id,
+      shipmentId: id,
+      stagedImages: input.stagedImages,
+      removeImageIds: input.removeManualImageIds,
+    })
 
     const { data, error } = await auth.supabase
       .from('shipments')
@@ -111,6 +133,12 @@ export async function PATCH(request: Request, context: RouteContext) {
     })
     if (linkError) throw new Error(linkError.message)
 
+    await removeShipmentImages({
+      userId: auth.user.id,
+      shipmentId: id,
+      imageIds: input.removeManualImageIds,
+    })
+
     revalidatePath('/shipments')
     revalidatePath(`/shipments/${id}`)
     revalidatePath(`/shipments/${id}/edit`)
@@ -123,8 +151,9 @@ export async function PATCH(request: Request, context: RouteContext) {
       revalidatePath(`/warehouse-packages/${packageId}`)
     }
 
-    return NextResponse.json({ id })
+    return NextResponse.json({ id, warnings: archived.warnings })
   } catch (error) {
+    if (id) await rollbackArchivedShipmentImages(auth.user.id, id, archived)
     return errorResponse(error, 'Die internationale Sendung konnte nicht aktualisiert werden.')
   }
 }
@@ -145,12 +174,21 @@ export async function DELETE(request: Request, context: RouteContext) {
   try {
     const { id: rawId } = await context.params
     const id = shipmentIdSchema.parse(rawId)
-    const { data: links, error: linksError } = await auth.supabase
-      .from('shipment_packages')
-      .select('warehouse_package_id')
-      .eq('shipment_id', id)
-      .eq('user_id', auth.user.id)
-    if (linksError) throw new Error(linksError.message)
+    const [linksResult, imagesResult] = await Promise.all([
+      auth.supabase
+        .from('shipment_packages')
+        .select('warehouse_package_id')
+        .eq('shipment_id', id)
+        .eq('user_id', auth.user.id),
+      auth.supabase
+        .from('shipment_images')
+        .select('storage_path')
+        .eq('shipment_id', id)
+        .eq('user_id', auth.user.id),
+    ])
+
+    if (linksResult.error) throw new Error(linksResult.error.message)
+    if (imagesResult.error) throw new Error(imagesResult.error.message)
 
     const { data: deleted, error } = await auth.supabase
       .from('shipments')
@@ -165,9 +203,13 @@ export async function DELETE(request: Request, context: RouteContext) {
       return NextResponse.json({ error: 'Sendung nicht gefunden.' }, { status: 404 })
     }
 
+    await removeShipmentStoragePaths(
+      (imagesResult.data ?? []).map((image) => image.storage_path),
+    )
+
     revalidatePath('/shipments')
     revalidatePath('/warehouse-packages')
-    for (const link of links ?? []) {
+    for (const link of linksResult.data ?? []) {
       revalidatePath(`/warehouse-packages/${link.warehouse_package_id}`)
     }
 
