@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
+import { purchaseImageCategoryLabels } from '@/lib/purchase-image-categories'
 import { DeleteWarehousePackageButton } from '@/components/delete-warehouse-package-button'
 import { requireUser } from '@/lib/auth'
 import { formatDate } from '@/lib/format'
@@ -162,7 +163,7 @@ export default async function WarehousePackageDetailPage({
                   )}
                   <figcaption>
                     <span>{purchase?.title ?? 'Bunjang-Einkauf'}</span>
-                    <span>Über Einkaufszuordnung eingeblendet</span>
+                    <span>{purchaseImageCategoryLabels[image.category]} · über Einkaufszuordnung</span>
                   </figcaption>
                 </figure>
               )

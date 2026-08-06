@@ -196,6 +196,7 @@ export async function POST(request: Request) {
         sha256: asset.sha256,
         position,
         kind: 'remote',
+        category: 'listing',
       })
     }
 
@@ -231,6 +232,7 @@ export async function POST(request: Request) {
         sha256: asset.sha256,
         position,
         kind: 'manual',
+        category: 'general',
       })
     }
 

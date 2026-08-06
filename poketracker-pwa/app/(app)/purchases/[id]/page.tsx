@@ -7,7 +7,9 @@ import { PurchaseWarehousePackages } from '@/components/purchase-warehouse-packa
 import { formatDate, formatMoney } from '@/lib/format'
 import { requireUser } from '@/lib/auth'
 import { createSignedImageUrl } from '@/lib/storage'
-import type { PurchaseRow } from '@/lib/types'
+import { purchaseImageCategoryLabels } from '@/lib/purchase-image-categories'
+import type { PurchaseImageCategory, PurchaseRow } from '@/lib/types'
+
 
 export const metadata: Metadata = { title: 'Einkaufsdetails' }
 export const dynamic = 'force-dynamic'
@@ -29,7 +31,7 @@ export default async function PurchaseDetailPage({
   const { data, error } = await supabase
     .from('purchases')
     .select(
-      'id, source, source_listing_id, listing_url, canonical_url, title, description, seller_name, price_amount, price_currency, domestic_shipping_amount, service_fee_amount, purchased_at, status, created_at, updated_at, purchase_images(id, storage_path, source_url, original_filename, mime_type, byte_size, position, kind)',
+      'id, source, source_listing_id, listing_url, canonical_url, title, description, seller_name, price_amount, price_currency, domestic_shipping_amount, service_fee_amount, purchased_at, status, created_at, updated_at, purchase_images(id, storage_path, source_url, original_filename, mime_type, byte_size, position, kind, category)',
     )
     .eq('id', id)
     .single()
@@ -132,7 +134,13 @@ export default async function PurchaseDetailPage({
               )}
               <figcaption>
                 <span>Bild {index + 1}</span>
-                <span>{image.kind === 'remote' ? 'Automatisch archiviert' : 'Manuell hochgeladen'}</span>
+                <span>
+                  {purchaseImageCategoryLabels[
+                    (image.category || (image.kind === 'remote' ? 'listing' : 'general')) as PurchaseImageCategory
+                  ]}
+                  {' · '}
+                  {image.kind === 'remote' ? 'Automatisch archiviert' : 'Manuell hochgeladen'}
+                </span>
               </figcaption>
             </figure>
           ))}

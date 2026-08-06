@@ -5,6 +5,11 @@ import { getApiUser } from '@/lib/auth'
 import { updatePurchaseSchema } from '@/lib/importer/schema'
 import { hasTrustedRequestOrigin } from '@/lib/request-security'
 import { createAdminClient } from '@/lib/supabase/admin'
+import {
+  archivePurchaseImages,
+  removeManualPurchaseImages,
+  rollbackArchivedPurchaseImages,
+} from '@/lib/purchase-images'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -42,6 +47,23 @@ export async function PATCH(request: Request, context: RouteContext) {
     const input = updatePurchaseSchema.parse(await request.json())
     const admin = createAdminClient()
 
+    const { data: existing, error: existingError } = await admin
+      .from('purchases')
+      .select('id')
+      .eq('id', id)
+      .eq('user_id', auth.user.id)
+      .maybeSingle()
+
+    if (existingError) throw new Error(existingError.message)
+    if (!existing) return NextResponse.json({ error: 'Einkauf nicht gefunden.' }, { status: 404 })
+
+    const archived = await archivePurchaseImages({
+      userId: auth.user.id,
+      purchaseId: id,
+      stagedImages: input.stagedImages,
+      deletedImageIds: input.deleteManualImageIds,
+    })
+
     const { data, error } = await admin
       .from('purchases')
       .update({
@@ -60,14 +82,33 @@ export async function PATCH(request: Request, context: RouteContext) {
       .select('id')
       .maybeSingle()
 
-    if (error) throw new Error(error.message)
-    if (!data) return NextResponse.json({ error: 'Einkauf nicht gefunden.' }, { status: 404 })
+    if (error || !data) {
+      await rollbackArchivedPurchaseImages(auth.user.id, id, archived)
+      if (error) throw new Error(error.message)
+      return NextResponse.json({ error: 'Einkauf nicht gefunden.' }, { status: 404 })
+    }
+
+    const warnings = [...archived.warnings]
+    try {
+      await removeManualPurchaseImages({
+        userId: auth.user.id,
+        purchaseId: id,
+        imageIds: input.deleteManualImageIds,
+      })
+    } catch (error) {
+      warnings.push(
+        error instanceof Error
+          ? `Mindestens ein markiertes Bild konnte nicht entfernt werden: ${error.message}`
+          : 'Mindestens ein markiertes Bild konnte nicht entfernt werden.',
+      )
+    }
 
     revalidatePath('/purchases')
     revalidatePath(`/purchases/${id}`)
     revalidatePath(`/purchases/${id}/edit`)
+    revalidatePath('/warehouse-packages')
 
-    return NextResponse.json({ id })
+    return NextResponse.json({ id, warnings })
   } catch (error) {
     return errorResponse(error, 'Der Einkauf konnte nicht aktualisiert werden.')
   }

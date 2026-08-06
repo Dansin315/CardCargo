@@ -1448,3 +1448,53 @@ code {
   font-size: 0.92rem;
 }
 /* END CardCargo OLAEET package images v9 */
+
+
+/* BEGIN CardCargo purchase image management v10 */
+.purchase-edit-image-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.purchase-edit-image-grid article {
+  display: grid;
+  gap: 0.65rem;
+  align-content: start;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: var(--surface-soft);
+}
+
+.purchase-edit-image-grid article.marked-for-removal {
+  opacity: 0.55;
+  border-style: dashed;
+}
+
+.purchase-edit-image-grid img,
+.purchase-edit-image-grid .missing-image {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 0.75rem;
+}
+
+.purchase-edit-image-grid article > div:not(.missing-image) {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.purchase-edit-image-grid span,
+.purchase-new-image-list label {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.purchase-new-image-list label {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+}
+/* END CardCargo purchase image management v10 */

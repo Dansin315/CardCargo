@@ -11,6 +11,20 @@ const stagedImageSchema = z.object({
   byteSize: z.number().int().positive().max(6 * 1024 * 1024),
 })
 
+
+const purchaseImageCategorySchema = z.enum([
+  'listing',
+  'general',
+  'chat',
+  'condition',
+  'receipt',
+  'shipping',
+])
+
+const stagedPurchaseImageSchema = stagedImageSchema.extend({
+  category: purchaseImageCategorySchema,
+})
+
 const dateOnlySchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, 'Ungültiges Kaufdatum.')
@@ -81,6 +95,8 @@ export const updatePurchaseSchema = z.object({
     .length(3)
     .transform((value) => value.toUpperCase()),
   purchasedAt: dateOnlySchema.nullable(),
+  stagedImages: z.array(stagedPurchaseImageSchema).max(12).default([]),
+  deleteManualImageIds: z.array(z.string().uuid()).max(24).default([]),
   status: z.enum([
     'planned',
     'ordered',

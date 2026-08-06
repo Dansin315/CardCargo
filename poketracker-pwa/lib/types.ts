@@ -26,6 +26,14 @@ export interface ListingPreview {
   warnings: string[]
 }
 
+export type PurchaseImageCategory =
+  | 'listing'
+  | 'general'
+  | 'chat'
+  | 'condition'
+  | 'receipt'
+  | 'shipping'
+
 export interface StagedImageInput {
   path: string
   originalName: string
@@ -42,6 +50,7 @@ export interface PurchaseImageRow {
   byte_size: number | null
   position: number
   kind: 'remote' | 'manual'
+  category?: PurchaseImageCategory
 }
 
 export interface PurchaseRow {

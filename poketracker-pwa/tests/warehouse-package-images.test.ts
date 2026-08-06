@@ -26,8 +26,8 @@ const baseInput = {
 }
 
 const images: PackagePurchaseImageChoice[] = [
-  { id: 'image-a', purchase_id: 'purchase-a', position: 1, signed_url: 'https://example.test/a' },
-  { id: 'image-b', purchase_id: 'purchase-b', position: 1, signed_url: 'https://example.test/b' },
+  { id: 'image-a', purchase_id: 'purchase-a', position: 1, category: 'listing',  signed_url: 'https://example.test/a' },
+  { id: 'image-b', purchase_id: 'purchase-b', position: 1, category: 'listing',  signed_url: 'https://example.test/b' },
 ]
 
 describe('OLAEET package images', () => {

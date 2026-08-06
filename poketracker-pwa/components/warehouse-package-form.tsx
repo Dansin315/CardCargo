@@ -10,6 +10,7 @@ import {
   type FormEvent,
 } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { purchaseImageCategoryLabels } from '@/lib/purchase-image-categories'
 import type { StagedImageInput } from '@/lib/types'
 import {
   addDaysToDate,
@@ -439,7 +440,7 @@ export function WarehousePackageForm({
                       )}
                       <figcaption>
                         <span>{purchase?.title ?? 'Bunjang-Einkauf'}</span>
-                        <span>Wird über die Einkaufszuordnung angezeigt</span>
+                        <span>{purchaseImageCategoryLabels[image.category]} · über Einkaufszuordnung</span>
                       </figcaption>
                     </figure>
                   )

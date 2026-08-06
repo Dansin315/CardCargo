@@ -1,3 +1,5 @@
+import type { PurchaseImageCategory } from '@/lib/types'
+
 export const packageStatuses = [
   'expected',
   'received',
@@ -70,6 +72,7 @@ export interface PackagePurchaseImageChoice {
   id: string
   purchase_id: string
   position: number
+  category: PurchaseImageCategory
   signed_url: string | null
 }
 
