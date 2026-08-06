@@ -6,6 +6,11 @@ import { DeleteWarehousePackageButton } from '@/components/delete-warehouse-pack
 import { requireUser } from '@/lib/auth'
 import { formatDate } from '@/lib/format'
 import {
+  shipmentStatusLabels,
+  shippingServiceLabels,
+  type ShipmentRow,
+} from '@/lib/shipments'
+import {
   loadPurchaseImageChoices,
   loadWarehousePackageManualImages,
 } from '@/lib/warehouse-package-image-queries'
@@ -73,6 +78,19 @@ export default async function WarehousePackageDetailPage({
     loadPurchaseImageChoices(supabase, purchaseIds),
     loadWarehousePackageManualImages(supabase, id),
   ])
+
+  let linkedShipment: ShipmentRow | null = null
+  if (shipmentResult.data?.shipment_id) {
+    const { data, error } = await supabase
+      .from('shipments')
+      .select(
+        'id, provider, external_shipment_id, carrier, shipping_service, tracking_number, status, shipped_at, estimated_delivery_at, delivered_at, total_weight_grams, international_shipping_amount, forwarding_fee_amount, import_tax_amount, currency, notes, created_at, updated_at',
+      )
+      .eq('id', shipmentResult.data.shipment_id)
+      .maybeSingle()
+    if (error) throw new Error(error.message)
+    linkedShipment = data as unknown as ShipmentRow | null
+  }
 
   const label =
     warehousePackage.external_package_id ||
@@ -259,11 +277,40 @@ export default async function WarehousePackageDetailPage({
         </section>
       ) : null}
 
-      {shipmentResult.data ? (
-        <div className="alert alert-info">
-          Dieses Paket ist bereits einer internationalen Sendung zugeordnet und kann erst nach dem Entfernen dieser Zuordnung gelöscht werden.
+      <section className="panel shipment-link-panel">
+        <div className="panel-heading">
+          <div>
+            <h2>Internationale Sendung</h2>
+            <p>Zuordnung für den Versand von OLAEET nach Deutschland.</p>
+          </div>
         </div>
-      ) : null}
+        {linkedShipment ? (
+          <Link className="linked-shipment-card" href={`/shipments/${linkedShipment.id}`}>
+            <span>
+              <strong>
+                {linkedShipment.external_shipment_id ||
+                  linkedShipment.tracking_number ||
+                  shippingServiceLabels[linkedShipment.shipping_service]}
+              </strong>
+              <small>
+                {shippingServiceLabels[linkedShipment.shipping_service]} ·{' '}
+                {linkedShipment.tracking_number || 'Keine Trackingnummer'}
+              </small>
+            </span>
+            <span className={`status-badge status-${linkedShipment.status}`}>
+              {shipmentStatusLabels[linkedShipment.status]}
+            </span>
+            <span className="row-arrow">›</span>
+          </Link>
+        ) : (
+          <div className="empty-state compact-empty">
+            <p>Dieses OLAEET-Paket ist noch keiner internationalen Sendung zugeordnet.</p>
+            <Link className="button button-secondary" href={`/shipments/new?package=${id}`}>
+              Einer Sendung zuordnen
+            </Link>
+          </div>
+        )}
+      </section>
     </div>
   )
 }

@@ -21,6 +21,7 @@ export function AppShell({ children, email }: { children: ReactNode; email: stri
           <Link href="/purchases">Einkäufe</Link>
           <Link href="/purchases/new">URL importieren</Link>
           <Link href="/warehouse-packages">OLAEET-Pakete</Link>
+          <Link href="/shipments">Sendungen</Link>
           <span className="nav-disabled" title="Folgt in einem nächsten Ausbauschritt">
             Inventar
           </span>
