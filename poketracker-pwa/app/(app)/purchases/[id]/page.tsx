@@ -8,6 +8,8 @@ import { formatDate, formatMoney } from '@/lib/format'
 import { requireUser } from '@/lib/auth'
 import { createSignedImageUrl } from '@/lib/storage'
 import { purchaseImageCategoryLabels } from '@/lib/purchase-image-categories'
+import { loadPurchaseShipmentCostAllocation } from '@/lib/shipment-cost-allocation-queries'
+import { shipmentLabel, shippingServiceLabels } from '@/lib/shipments'
 import type { PurchaseImageCategory, PurchaseRow } from '@/lib/types'
 
 
@@ -38,14 +40,17 @@ export default async function PurchaseDetailPage({
 
   if (error || !data) notFound()
   const purchase = data as unknown as PurchaseRow
-  const images = await Promise.all(
-    [...(purchase.purchase_images ?? [])]
-      .sort((a, b) => a.position - b.position)
-      .map(async (image) => ({
-        ...image,
-        signedUrl: await createSignedImageUrl(supabase, image.storage_path),
-      })),
-  )
+  const [images, shipmentCostAllocation] = await Promise.all([
+    Promise.all(
+      [...(purchase.purchase_images ?? [])]
+        .sort((a, b) => a.position - b.position)
+        .map(async (image) => ({
+          ...image,
+          signedUrl: await createSignedImageUrl(supabase, image.storage_path),
+        })),
+    ),
+    loadPurchaseShipmentCostAllocation(supabase, id),
+  ])
 
   return (
     <div className="page-stack">
@@ -146,6 +151,51 @@ export default async function PurchaseDetailPage({
           ))}
         </div>
       </section>
+
+      {shipmentCostAllocation ? (
+        <section className="panel">
+          <div className="panel-heading">
+            <div>
+              <h2>Internationale Kostenallokation</h2>
+              <p>Dieser Anteil wurde aus der zugeordneten internationalen OLAEET-Sendung übernommen.</p>
+            </div>
+            <Link
+              className="button button-secondary"
+              href={`/shipments/${shipmentCostAllocation.shipment.id}`}
+            >
+              Sendung öffnen
+            </Link>
+          </div>
+          <div className="shipment-cost-grid">
+            <div>
+              <span>Internationaler Versand</span>
+              <strong>{formatMoney(shipmentCostAllocation.allocation.international_shipping_amount, shipmentCostAllocation.shipment.currency)}</strong>
+            </div>
+            <div>
+              <span>OLAEET-Servicegebühren</span>
+              <strong>{formatMoney(shipmentCostAllocation.allocation.forwarding_fee_amount, shipmentCostAllocation.shipment.currency)}</strong>
+            </div>
+            <div>
+              <span>Zoll und Einfuhr</span>
+              <strong>{formatMoney(shipmentCostAllocation.allocation.import_tax_amount, shipmentCostAllocation.shipment.currency)}</strong>
+            </div>
+            <div className="shipment-cost-total">
+              <span>International allokiert</span>
+              <strong>{formatMoney(
+                shipmentCostAllocation.allocation.international_shipping_amount +
+                  shipmentCostAllocation.allocation.forwarding_fee_amount +
+                  shipmentCostAllocation.allocation.import_tax_amount,
+                shipmentCostAllocation.shipment.currency,
+              )}</strong>
+            </div>
+          </div>
+          <p className="allocation-footnote">
+            Sendung: {shipmentLabel(shipmentCostAllocation.shipment as Parameters<typeof shipmentLabel>[0])}
+            {' · '}
+            {shippingServiceLabels[shipmentCostAllocation.shipment.shipping_service as keyof typeof shippingServiceLabels]}
+          </p>
+        </section>
+      ) : null}
 
       <div className="detail-grid">
         <section className="panel">

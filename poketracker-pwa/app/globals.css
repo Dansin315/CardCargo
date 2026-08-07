@@ -1816,3 +1816,210 @@ code {
   }
 }
 /* END CardCargo international shipment images v12 */
+
+
+/* BEGIN CardCargo image detection experiment v13 */
+.analysis-source-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 1rem;
+}
+.analysis-source-card,
+.analysis-candidate {
+  border: 1px solid var(--border, #e2e4ea);
+  border-radius: 20px;
+  background: var(--surface, #fff);
+  overflow: hidden;
+}
+.analysis-source-image {
+  aspect-ratio: 4 / 3;
+  background: #f4f5f8;
+}
+.analysis-source-image img,
+.analysis-review-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.analysis-source-copy {
+  display: grid;
+  gap: .5rem;
+  padding: 1rem;
+}
+.analysis-source-copy small { color: var(--muted, #6f7480); }
+.analysis-privacy-note { border-style: dashed; }
+.analysis-job-list,
+.inventory-detection-list { display: grid; gap: .65rem; }
+.analysis-job-row,
+.inventory-detection-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.5fr) 1fr auto auto;
+  align-items: center;
+  gap: 1rem;
+  padding: .9rem 1rem;
+  border: 1px solid var(--border, #e2e4ea);
+  border-radius: 14px;
+  text-decoration: none;
+  color: inherit;
+}
+.inventory-detection-row { grid-template-columns: minmax(200px, 2fr) 1fr 1fr 1fr 1fr .7fr .8fr; }
+.analysis-job-row span:first-child,
+.inventory-detection-row span:first-child { display: grid; gap: .2rem; }
+.analysis-job-row small,
+.inventory-detection-row small { color: var(--muted, #6f7480); }
+.analysis-status {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  border-radius: 999px;
+  padding: .32rem .6rem;
+  background: #eef0f5;
+  font-size: .82rem;
+  font-weight: 700;
+}
+.analysis-status-completed,
+.analysis-status-confirmed,
+.analysis-status-inventory_created { background: #e8f6ec; color: #216436; }
+.analysis-status-failed,
+.analysis-status-rejected { background: #fae9e9; color: #8c2b2b; }
+.analysis-status-processing,
+.analysis-status-pending_review,
+.analysis-status-corrected { background: #fff4d8; color: #7f5712; }
+.analysis-source-review {
+  display: grid;
+  grid-template-columns: minmax(260px, .8fr) minmax(280px, 1.2fr);
+  gap: 1.5rem;
+  align-items: center;
+}
+.analysis-review-image {
+  min-height: 320px;
+  max-height: 620px;
+  display: grid;
+  place-items: center;
+  background: #f4f5f8;
+  border-radius: 16px;
+  overflow: hidden;
+}
+.analysis-candidate-list { display: grid; gap: 1rem; }
+.analysis-candidate { padding: 1.25rem; }
+.analysis-candidate-rejected { opacity: .72; }
+.analysis-confidence { margin: -.4rem 0 1rem; color: var(--muted, #6f7480); }
+.analysis-form-grid { margin-bottom: 1rem; }
+.analysis-form-grid label,
+.field-stack { display: grid; gap: .35rem; }
+.analysis-actions { margin-top: 1rem; flex-wrap: wrap; }
+.form-message { margin: .75rem 0 0; font-weight: 600; }
+.field-error { color: #a12e2e; }
+@media (max-width: 900px) {
+  .analysis-source-review { grid-template-columns: 1fr; }
+  .analysis-job-row,
+  .inventory-detection-row { grid-template-columns: 1fr; }
+}
+/* END CardCargo image detection experiment v13 */
+
+/* CardCargo cost allocation v13 */
+.allocation-method-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.allocation-method-grid label {
+  display: grid;
+  gap: 0.45rem;
+  font-weight: 700;
+}
+
+.allocation-method-grid small,
+.allocation-table small {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--muted, #6b7280);
+  font-weight: 500;
+}
+
+.allocation-actions {
+  margin-top: 1rem;
+  justify-content: flex-end;
+}
+
+.allocation-table-wrap {
+  overflow-x: auto;
+}
+
+.allocation-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 980px;
+}
+
+.allocation-table th,
+.allocation-table td {
+  padding: 0.8rem;
+  border-bottom: 1px solid var(--border, #e5e7eb);
+  text-align: left;
+  vertical-align: top;
+}
+
+.allocation-table input {
+  width: 8.5rem;
+}
+
+.allocation-table tfoot th {
+  font-weight: 800;
+}
+
+.allocation-footnote {
+  margin-top: 1rem;
+  color: var(--muted, #6b7280);
+  font-size: 0.9rem;
+}
+
+.allocation-summary {
+  margin-top: 0.9rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  align-items: center;
+}
+
+@media (max-width: 900px) {
+  .allocation-method-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.allocation-package-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+}
+
+.allocation-package-card {
+  padding: 1rem;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 0.9rem;
+}
+
+.allocation-package-card > small {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--muted, #6b7280);
+}
+
+.allocation-package-card dl {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0.9rem 0 0;
+}
+
+.allocation-package-card dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.allocation-package-card dt,
+.allocation-package-card dd {
+  margin: 0;
+}

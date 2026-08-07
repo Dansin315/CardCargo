@@ -5,6 +5,7 @@ import { DeleteShipmentButton } from '@/components/delete-shipment-button'
 import { requireUser } from '@/lib/auth'
 import { formatDate, formatMoney } from '@/lib/format'
 import { purchaseImageCategoryLabels } from '@/lib/purchase-image-categories'
+import { loadShipmentAllocationSummary } from '@/lib/shipment-cost-allocation-queries'
 import {
   loadShipmentLinkedImages,
   loadShipmentManualImages,
@@ -36,7 +37,7 @@ export default async function ShipmentDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ created?: string; updated?: string }>
+  searchParams: Promise<{ created?: string; updated?: string; allocation?: string }>
 }) {
   const { id } = await params
   const query = await searchParams
@@ -74,9 +75,10 @@ export default async function ShipmentDetailPage({
     packages = (data ?? []) as unknown as ShipmentWarehousePackageChoice[]
   }
 
-  const [manualImages, linkedImages] = await Promise.all([
+  const [manualImages, linkedImages, allocationSummary] = await Promise.all([
     loadShipmentManualImages(supabase, id),
     loadShipmentLinkedImages(supabase, packages),
+    loadShipmentAllocationSummary(supabase, id),
   ])
   const label = shipmentLabel(shipment)
   const costTotal = totalShipmentCosts(shipment)
@@ -93,6 +95,9 @@ export default async function ShipmentDetailPage({
       ) : null}
       {query.updated === '1' ? (
         <div className="alert alert-success">Die internationale Sendung wurde aktualisiert.</div>
+      ) : null}
+      {query.allocation === '1' ? (
+        <div className="alert alert-success">Die Sendungskosten wurden auf die Einkäufe verteilt.</div>
       ) : null}
 
       <header className="detail-header">
@@ -164,7 +169,7 @@ export default async function ShipmentDetailPage({
         <div className="panel-heading">
           <div>
             <h2>Kostenübersicht</h2>
-            <p>Aktuell noch ohne Verteilung auf einzelne Einkäufe oder Karten.</p>
+            <p>Verteilung der Sendungskosten auf die enthaltenen Bunjang-Einkäufe.</p>
           </div>
           <span className="panel-note">{shipment.currency}</span>
         </div>
@@ -173,6 +178,16 @@ export default async function ShipmentDetailPage({
           <div><span>OLAEET-Servicegebühren</span><strong>{formatMoney(shipment.forwarding_fee_amount, shipment.currency)}</strong></div>
           <div><span>Zoll und Einfuhr</span><strong>{formatMoney(shipment.import_tax_amount, shipment.currency)}</strong></div>
           <div className="shipment-cost-total"><span>Gesamte Sendungskosten</span><strong>{formatMoney(costTotal, shipment.currency)}</strong></div>
+        </div>
+        <div className="allocation-summary">
+          <span>Allokierte Einkäufe: <strong>{allocationSummary.purchaseCount}</strong></span>
+          <span>Allokiert gesamt: <strong>{formatMoney(
+            allocationSummary.shipping + allocationSummary.forwarding + allocationSummary.importTax,
+            shipment.currency,
+          )}</strong></span>
+          <Link className="button button-secondary" href={`/shipments/${id}/allocation`}>
+            {allocationSummary.purchaseCount ? 'Kostenallokation bearbeiten' : 'Kosten verteilen'}
+          </Link>
         </div>
       </section>
 
