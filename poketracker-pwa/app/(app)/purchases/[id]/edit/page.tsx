@@ -2,6 +2,7 @@ import Link from 'next/link'
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { PurchaseEditForm } from '@/components/purchase-edit-form'
+import { PurchaseItemsManager } from '@/components/purchase-items-manager'
 import { requireUser } from '@/lib/auth'
 import { createSignedImageUrl } from '@/lib/storage'
 import type { PurchaseImageCategory, PurchaseRow } from '@/lib/types'
@@ -51,6 +52,12 @@ export default async function EditPurchasePage({ params }: { params: Promise<{ i
       </header>
 
       <PurchaseEditForm purchase={purchase} userId={user.id} images={images} />
+
+      <PurchaseItemsManager
+        purchaseId={purchase.id}
+        purchaseCurrency={purchase.price_currency}
+        purchaseStatus={purchase.status}
+      />
     </div>
   )
 }

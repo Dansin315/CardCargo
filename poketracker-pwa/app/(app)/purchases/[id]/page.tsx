@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation'
 import { StatusBadge } from '@/components/status-badge'
 import { DeletePurchaseButton } from '@/components/delete-purchase-button'
 import { PurchaseWarehousePackages } from '@/components/purchase-warehouse-packages'
+import { PurchaseItemsSummary } from '@/components/purchase-items-summary'
 import { formatDate, formatMoney } from '@/lib/format'
 import { requireUser } from '@/lib/auth'
 import { createSignedImageUrl } from '@/lib/storage'
@@ -151,6 +152,8 @@ export default async function PurchaseDetailPage({
           ))}
         </div>
       </section>
+
+      <PurchaseItemsSummary purchaseId={purchase.id} />
 
       {shipmentCostAllocation ? (
         <section className="panel">

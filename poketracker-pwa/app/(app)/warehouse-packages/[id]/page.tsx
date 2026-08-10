@@ -3,6 +3,7 @@ import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { purchaseImageCategoryLabels } from '@/lib/purchase-image-categories'
 import { DeleteWarehousePackageButton } from '@/components/delete-warehouse-package-button'
+import { PurchaseItemsManager } from '@/components/purchase-items-manager'
 import { requireUser } from '@/lib/auth'
 import { formatDate } from '@/lib/format'
 import {
@@ -269,6 +270,12 @@ export default async function WarehousePackageDetailPage({
           </div>
         )}
       </section>
+
+      <PurchaseItemsManager
+        warehousePackageId={id}
+        purchaseCurrency="KRW"
+        purchaseStatus={warehousePackage.status}
+      />
 
       {warehousePackage.notes ? (
         <section className="panel">

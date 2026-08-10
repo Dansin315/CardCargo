@@ -7,8 +7,8 @@ export default function manifest(): MetadataRoute.Manifest {
     description: 'Bunjang-Einkäufe, Sendungen und Pokémon-Karten-Inventar verwalten.',
     start_url: '/',
     display: 'standalone',
-    background_color: '#f5f6f8',
-    theme_color: '#171923',
+    background_color: '#f5ede0',
+    theme_color: '#f5ede0',
     icons: [
       {
         src: '/icon-192.png',

@@ -1,0 +1,1138 @@
+import 'server-only'
+import { setDefaultResultOrder } from 'node:dns'
+import { setDefaultAutoSelectFamily } from 'node:net'
+
+setDefaultResultOrder('ipv4first')
+setDefaultAutoSelectFamily(false)
+
+import {
+  cardNumberNumerator,
+  catalogMatchType,
+  comparableCardNumber,
+  displayCardNumber,
+  tcgdexCatalogLanguage,
+  tcgdexImageUrl,
+  variantLabels,
+  type CardCatalogCandidate,
+} from '@/lib/card-catalog-types'
+
+interface CatalogSearchInput {
+  name?: string
+  cardNumber?: string
+  setCode?: string
+  itemLanguage?: string
+  includeFallback?: boolean
+}
+
+interface TcgDexBrief {
+  id: string
+  localId: string | number
+  name: string
+  image?: string
+}
+
+interface TcgDexDetail extends TcgDexBrief {
+  category?: string
+  illustrator?: string
+  rarity?: string
+  hp?: number
+  types?: string[]
+  dexId?: number[]
+  suffix?: string
+  variants?: Record<string, unknown>
+  set?: {
+    id?: string
+    name?: string
+    cardCount?: { official?: number; total?: number }
+  }
+}
+
+interface TcgDexSet {
+  id: string
+  name: string
+  cards?: TcgDexBrief[]
+  cardCount?: {
+    official?: number
+    total?: number
+  }
+  tcgOnline?: string
+}
+
+interface PokemonTcgCard {
+  id: string
+  name: string
+  supertype?: string
+  subtypes?: string[]
+  hp?: string
+  types?: string[]
+  number?: string
+  artist?: string
+  rarity?: string
+  set?: {
+    id?: string
+    name?: string
+    ptcgoCode?: string
+    printedTotal?: number
+    total?: number
+  }
+  images?: { small?: string; large?: string }
+}
+
+interface PokeApiSpeciesName {
+  name: string
+  language: {
+    name: string
+  }
+}
+
+interface PokeApiSpecies {
+  id: number
+  name: string
+  names?: PokeApiSpeciesName[]
+}
+
+function normalizedText(value: string | null | undefined) {
+  return String(value ?? '').trim().toLocaleLowerCase()
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function describeFetchError(error: unknown) {
+  if (!(error instanceof Error)) return 'Unbekannter Netzwerkfehler.'
+
+  const parts = [error.message]
+  const cause = (error as Error & { cause?: unknown }).cause
+
+  if (cause instanceof Error && cause.message && cause.message !== error.message) {
+    parts.push(cause.message)
+  } else if (cause && typeof cause === 'object') {
+    const code = 'code' in cause && typeof cause.code === 'string' ? cause.code : null
+    const message =
+      'message' in cause && typeof cause.message === 'string' ? cause.message : null
+    if (code) parts.push(code)
+    if (message && message !== error.message) parts.push(message)
+  }
+
+  return [...new Set(parts)].join(' · ')
+}
+
+class CatalogHttpError extends Error {
+  retryable: boolean
+
+  constructor(message: string, retryable: boolean) {
+    super(message)
+    this.name = 'CatalogHttpError'
+    this.retryable = retryable
+  }
+}
+
+async function fetchJson<T>(
+  url: string,
+  init?: RequestInit,
+  options?: { attempts?: number; timeoutMs?: number },
+): Promise<T> {
+  const attempts = Math.max(1, options?.attempts ?? 2)
+  const timeoutMs = Math.max(1_000, options?.timeoutMs ?? 20_000)
+  let lastError: unknown = null
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        ...init,
+        cache: 'no-store',
+        signal: AbortSignal.timeout(timeoutMs),
+      })
+
+      if (!response.ok) {
+        const body = await response.text().catch(() => '')
+        const contentType = response.headers.get('content-type') ?? ''
+        const isHtml = contentType.includes('text/html') || /^\s*<!doctype html/i.test(body)
+        const detail = isHtml ? '' : body.trim().slice(0, 240)
+        const retryable = response.status === 429 || response.status >= 500
+        const error = new CatalogHttpError(
+          `Kataloganfrage fehlgeschlagen (${response.status})${detail ? `: ${detail}` : '.'}`,
+          retryable,
+        )
+
+        if (retryable && attempt < attempts) {
+          lastError = error
+          await wait(400 * attempt)
+          continue
+        }
+
+        throw error
+      }
+
+      return (await response.json()) as T
+    } catch (error) {
+      lastError = error
+
+      if (error instanceof CatalogHttpError && !error.retryable) throw error
+
+      if (attempt < attempts) {
+        await wait(400 * attempt)
+        continue
+      }
+    }
+  }
+
+  if (lastError instanceof CatalogHttpError) throw lastError
+  throw new Error(`Netzwerkfehler nach ${attempts} Versuchen: ${describeFetchError(lastError)}`)
+}
+
+function tcgdexSearchLanguages(itemLanguage: string) {
+  const mapped = tcgdexCatalogLanguage(itemLanguage)
+
+  // Korean physical cards deliberately use the Japanese TCGdex catalog first,
+  // because it is often the closest reference catalog for Korean releases.
+  if (itemLanguage === 'Korean') return ['ja', 'en']
+
+  // If the user explicitly selects Japanese, never silently replace an empty
+  // Japanese result with an English card. An EN candidate looked like a valid
+  // Japanese match in the UI even though catalogLanguage was actually "en".
+  if (itemLanguage === 'Japanese') return ['ja']
+
+  return [...new Set([mapped, 'en'])]
+}
+
+function extractPokemonCardSuffix(name: string) {
+  return (
+    name
+      .trim()
+      .match(/\s+(ex|EX|GX|V-UNION|VMAX|VSTAR|V|BREAK|LV\.X|Prime)$/u)?.[1] ??
+    null
+  )
+}
+
+function stripPokemonCardSuffix(name: string) {
+  return name
+    .replace(/\s+(?:ex|EX|GX|V-UNION|VMAX|VSTAR|V|BREAK|LV\.X|Prime)$/u, '')
+    .trim()
+}
+
+function appendSuffix(name: string, suffix: string | null | undefined) {
+  const cleanName = name.trim()
+  const cleanSuffix = String(suffix ?? '').trim()
+  if (!cleanSuffix) return cleanName
+  if (normalizedText(cleanName).endsWith(normalizedText(cleanSuffix))) return cleanName
+  return `${cleanName} ${cleanSuffix}`.trim()
+}
+
+function containsLatinLetter(value: string) {
+  return /[A-Za-z]/.test(value)
+}
+
+function normalizedPokemonSearchName(value: string) {
+  return normalizedText(stripPokemonCardSuffix(value))
+}
+
+const JAPANESE_CARD_NAME_PREFIXES: Record<string, string[]> = {
+  shining: ['ひかる'],
+  radiant: ['かがやく'],
+  dark: ['わるい'],
+  light: ['やさしい'],
+  "rocket's": ['ロケット団の', 'R団の'],
+  birthday: ['おたんじょうび'],
+  surfing: ['なみのり'],
+  flying: ['そらをとぶ'],
+}
+
+interface PokemonSpeciesNames {
+  dexId: number
+  english: string
+  japanese: string | null
+}
+
+interface CrossLanguageNamePlan {
+  mode: 'species' | 'card-name'
+  dexIds: number[]
+  localizedSearchNames: string[]
+}
+
+function normalizedEnglishModifier(value: string) {
+  return normalizedText(value)
+    .replace(/[’]/g, "'")
+    .replace(/\s+/g, ' ')
+}
+
+function knownEnglishCardNameModifier(value: string) {
+  const normalized = normalizedEnglishModifier(value)
+
+  return Object.keys(JAPANESE_CARD_NAME_PREFIXES).find(
+    (modifier) =>
+      normalized === modifier ||
+      normalized.startsWith(`${modifier} `),
+  ) ?? null
+}
+
+function isPortablePokemonCardSuffix(value: string) {
+  return /^(?:ex|EX|GX|V-UNION|VMAX|VSTAR|V|BREAK|LV\.X|Prime)$/iu.test(
+    value.trim(),
+  )
+}
+
+async function fetchEnglishPokemonDetailsByName(name: string) {
+  const wanted = normalizedText(name)
+  if (!wanted) return [] as TcgDexDetail[]
+
+  const params = new URLSearchParams({ name: name.trim() })
+  const briefs = await fetchJson<TcgDexBrief[]>(
+    `https://api.tcgdex.net/v2/en/cards?${params.toString()}`,
+    undefined,
+    { attempts: 2, timeoutMs: 20_000 },
+  )
+
+  const matchingBriefs = briefs
+    .filter((brief) =>
+      normalizedText(brief.name).includes(wanted),
+    )
+    .slice(0, 32)
+
+  const details: TcgDexDetail[] = []
+
+  for (let index = 0; index < matchingBriefs.length; index += 4) {
+    const batch = matchingBriefs.slice(index, index + 4)
+    const batchDetails = await Promise.all(
+      batch.map(async (brief) => {
+        try {
+          return await fetchJson<TcgDexDetail>(
+            `https://api.tcgdex.net/v2/en/cards/${encodeURIComponent(brief.id)}`,
+            undefined,
+            { attempts: 1, timeoutMs: 10_000 },
+          )
+        } catch {
+          return null
+        }
+      }),
+    )
+
+    for (const detail of batchDetails) {
+      if (detail?.category === 'Pokemon') details.push(detail)
+    }
+  }
+
+  return details
+}
+
+async function resolvePokemonSpeciesNames(dexIds: number[]) {
+  const uniqueDexIds = [...new Set(dexIds)]
+  const names = new Map<number, PokemonSpeciesNames>()
+
+  for (let index = 0; index < uniqueDexIds.length; index += 4) {
+    const batch = uniqueDexIds.slice(index, index + 4)
+    const speciesResults = await Promise.all(
+      batch.map(async (dexId) => {
+        try {
+          return await fetchJson<PokeApiSpecies>(
+            `https://pokeapi.co/api/v2/pokemon-species/${encodeURIComponent(String(dexId))}/`,
+            undefined,
+            { attempts: 2, timeoutMs: 15_000 },
+          )
+        } catch {
+          return null
+        }
+      }),
+    )
+
+    for (const species of speciesResults) {
+      if (!species) continue
+
+      const english =
+        species.names?.find((entry) => entry.language.name === 'en')?.name ??
+        species.name
+
+      const japanese =
+        species.names?.find(
+          (entry) => normalizedText(entry.language.name) === 'ja-hrkt',
+        )?.name ??
+        species.names?.find(
+          (entry) => normalizedText(entry.language.name) === 'ja',
+        )?.name ??
+        null
+
+      names.set(species.id, {
+        dexId: species.id,
+        english,
+        japanese,
+      })
+    }
+  }
+
+  return names
+}
+
+function translateEnglishCardNameToJapanese(
+  englishCardName: string,
+  species: PokemonSpeciesNames,
+) {
+  if (!species.japanese) return [] as string[]
+
+  const fullName = englishCardName.trim()
+  const lowerFullName = fullName.toLocaleLowerCase()
+  const lowerSpecies = species.english.trim().toLocaleLowerCase()
+  const speciesIndex = lowerFullName.indexOf(lowerSpecies)
+
+  if (speciesIndex < 0) return [] as string[]
+
+  const prefix = fullName.slice(0, speciesIndex).trim()
+  const suffix = fullName.slice(speciesIndex + species.english.length).trim()
+
+  let translatedPrefixes = ['']
+
+  if (prefix) {
+    const normalizedPrefix = normalizedEnglishModifier(prefix)
+    translatedPrefixes =
+      JAPANESE_CARD_NAME_PREFIXES[normalizedPrefix] ?? []
+
+    if (!translatedPrefixes.length) return [] as string[]
+  }
+
+  if (suffix && !isPortablePokemonCardSuffix(suffix)) {
+    return [] as string[]
+  }
+
+  return translatedPrefixes.map(
+    (translatedPrefix) =>
+      `${translatedPrefix}${species.japanese}${suffix}`,
+  )
+}
+
+function pokeApiSpeciesSlug(value: string) {
+  return stripPokemonCardSuffix(value)
+    .trim()
+    .toLocaleLowerCase()
+    .replace(/♀/gu, '-f')
+    .replace(/♂/gu, '-m')
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .replace(/[’']/gu, '')
+    .replace(/[^a-z0-9]+/gu, '-')
+    .replace(/^-+|-+$/gu, '')
+}
+
+function comparablePokemonSpeciesName(value: string) {
+  return stripPokemonCardSuffix(value)
+    .trim()
+    .toLocaleLowerCase()
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .replace(/[^a-z0-9]+/gu, '')
+}
+
+async function resolveExactEnglishPokemonSpecies(
+  name: string,
+): Promise<CrossLanguageNamePlan | null> {
+  // Modifier searches (Shining, Radiant, Dark, ...) need the full-card-name
+  // pipeline. This shortcut is only for an actual Pokemon species name,
+  // optionally followed by a portable TCG suffix such as V, VMAX, VSTAR,
+  // ex, EX or GX.
+  if (knownEnglishCardNameModifier(name)) return null
+
+  const suffix = extractPokemonCardSuffix(name)
+  const speciesInput = stripPokemonCardSuffix(name).trim()
+  const slug = pokeApiSpeciesSlug(speciesInput)
+  if (!slug) return null
+
+  try {
+    const species = await fetchJson<PokeApiSpecies>(
+      `https://pokeapi.co/api/v2/pokemon-species/${encodeURIComponent(slug)}/`,
+      undefined,
+      { attempts: 2, timeoutMs: 15_000 },
+    )
+
+    const english =
+      species.names?.find(
+        (entry) => normalizedText(entry.language.name) === 'en',
+      )?.name ?? species.name
+
+    // A direct PokeAPI slug must still represent exactly the Pokemon species
+    // portion the user typed. The card suffix is validated/preserved separately.
+    if (
+      comparablePokemonSpeciesName(english) !==
+      comparablePokemonSpeciesName(speciesInput)
+    ) {
+      return null
+    }
+
+    const japanese =
+      species.names?.find(
+        (entry) => normalizedText(entry.language.name) === 'ja-hrkt',
+      )?.name ??
+      species.names?.find(
+        (entry) => normalizedText(entry.language.name) === 'ja',
+      )?.name ??
+      null
+
+    if (!japanese) return null
+
+    // Important: do NOT discard the suffix.
+    // "Volcarona V" must search Japanese TCGdex for "ウルガモスV", not
+    // merely "ウルガモス". The same applies to VMAX, VSTAR, ex, EX, GX, etc.
+    const localizedName = suffix ? `${japanese}${suffix}` : japanese
+
+    return {
+      mode: suffix ? 'card-name' : 'species',
+      dexIds: [species.id],
+      localizedSearchNames: [localizedName],
+    }
+  } catch {
+    // Partial names such as "Chari" are intentionally handled by the existing
+    // TCGdex-based resolver below.
+    return null
+  }
+}
+
+async function resolveCrossLanguageEnglishName(name: string) {
+  const cleanName = name.trim()
+  const wanted = normalizedText(cleanName)
+  if (!wanted) {
+    return {
+      mode: 'card-name',
+      dexIds: [],
+      localizedSearchNames: [],
+    } satisfies CrossLanguageNamePlan
+  }
+
+  // Fast and robust path for exact English species names. This avoids the old
+  // fan-out through many English TCGdex card details before we can translate a
+  // simple name such as "Volcarona" to the Japanese species name.
+  const exactSpecies = await resolveExactEnglishPokemonSpecies(cleanName)
+  if (exactSpecies) return exactSpecies
+
+  const details = await fetchEnglishPokemonDetailsByName(cleanName)
+  if (!details.length) {
+    return {
+      mode: 'card-name',
+      dexIds: [],
+      localizedSearchNames: [],
+    } satisfies CrossLanguageNamePlan
+  }
+
+  const dexIds = [
+    ...new Set(
+      details.flatMap((detail) =>
+        (detail.dexId ?? []).filter(
+          (dexId) => Number.isInteger(dexId) && dexId > 0,
+        ),
+      ),
+    ),
+  ]
+
+  const speciesByDexId = await resolvePokemonSpeciesNames(dexIds)
+  const forcedModifierMode = Boolean(knownEnglishCardNameModifier(cleanName))
+
+  // Species mode is reserved for a genuine Pokemon-name search. In particular,
+  // "Dark" must not be treated as a partial match for Darkrai, and "Shining"
+  // must not collapse into the dex IDs of every Shining card.
+  if (!forcedModifierMode) {
+    const speciesMatches = [
+      ...new Map(
+        details.flatMap((detail) =>
+          (detail.dexId ?? [])
+            .map((dexId) => speciesByDexId.get(dexId))
+            .filter(
+              (species): species is PokemonSpeciesNames =>
+                Boolean(species) &&
+                normalizedText(species?.english).includes(wanted),
+            )
+            .map((species) => [species.dexId, species] as const),
+        ),
+      ).values(),
+    ]
+
+    if (speciesMatches.length) {
+      return {
+        mode: 'species',
+        dexIds: speciesMatches.map((species) => species.dexId),
+        localizedSearchNames: [
+          ...new Set(
+            speciesMatches
+              .map((species) => species.japanese)
+              .filter((value): value is string => Boolean(value)),
+          ),
+        ],
+      } satisfies CrossLanguageNamePlan
+    }
+  }
+
+  // Card-name / modifier mode:
+  // Translate the FULL matching English card names, not only their Pokemon
+  // species. Example:
+  //   Shining Rayquaza -> ひかるレックウザ
+  //   Radiant Charizard -> かがやくリザードン
+  // This preserves the modifier that v23 previously discarded.
+  const translatedNames = new Set<string>()
+  const matchingDexIds = new Set<number>()
+
+  for (const detail of details) {
+    for (const dexId of detail.dexId ?? []) {
+      const species = speciesByDexId.get(dexId)
+      if (!species) continue
+
+      const translated = translateEnglishCardNameToJapanese(
+        detail.name,
+        species,
+      )
+
+      if (!translated.length) continue
+
+      matchingDexIds.add(dexId)
+      for (const translatedName of translated) {
+        translatedNames.add(translatedName)
+      }
+    }
+  }
+
+  return {
+    mode: 'card-name',
+    dexIds: [...matchingDexIds],
+    localizedSearchNames: [...translatedNames],
+  } satisfies CrossLanguageNamePlan
+}
+
+function unionBriefLists(lists: TcgDexBrief[][]) {
+  const byId = new Map<string, TcgDexBrief>()
+
+  for (const list of lists) {
+    for (const brief of list) byId.set(brief.id, brief)
+  }
+
+  return [...byId.values()]
+}
+
+
+async function fetchTcgdexBriefs(
+  language: string,
+  field: string,
+  value: string,
+) {
+  const params = new URLSearchParams({ [field]: value })
+
+  return fetchJson<TcgDexBrief[]>(
+    `https://api.tcgdex.net/v2/${encodeURIComponent(language)}/cards?${params.toString()}`,
+    undefined,
+    { attempts: 2, timeoutMs: 20_000 },
+  )
+}
+
+async function resolveEnglishPokemonNames(
+  dexId: number | null,
+  suffix: string | null | undefined,
+  cache: Map<number, { pokemonNameEn: string | null; englishName: string | null }>,
+) {
+  if (!dexId) return { pokemonNameEn: null, englishName: null }
+  const cached = cache.get(dexId)
+  if (cached) return cached
+
+  try {
+    const params = new URLSearchParams({ dexId: String(dexId) })
+    const briefs = await fetchJson<TcgDexBrief[]>(
+      `https://api.tcgdex.net/v2/en/cards?${params.toString()}`,
+      undefined,
+      { attempts: 1, timeoutMs: 10_000 },
+    )
+
+    const names = [...new Set(briefs.map((brief) => brief.name.trim()).filter(Boolean))]
+    if (!names.length) {
+      const empty = { pokemonNameEn: null, englishName: null }
+      cache.set(dexId, empty)
+      return empty
+    }
+
+    const speciesCandidates = [...new Set(names.map(stripPokemonCardSuffix).filter(Boolean))]
+      .sort((a, b) => a.length - b.length || a.localeCompare(b))
+    const pokemonNameEn = speciesCandidates[0] ?? null
+
+    const wantedSuffix = normalizedText(suffix)
+    const matchingSuffixNames = wantedSuffix
+      ? names
+          .filter((name) => normalizedText(name).endsWith(wantedSuffix))
+          .sort((a, b) => a.length - b.length || a.localeCompare(b))
+      : []
+
+    const englishName =
+      matchingSuffixNames[0] ??
+      (pokemonNameEn ? appendSuffix(pokemonNameEn, suffix) : null)
+
+    const resolved = { pokemonNameEn, englishName }
+    cache.set(dexId, resolved)
+    return resolved
+  } catch {
+    const empty = { pokemonNameEn: null, englishName: null }
+    cache.set(dexId, empty)
+    return empty
+  }
+}
+
+
+async function fetchTcgdexSet(language: string, setCode: string) {
+  return fetchJson<TcgDexSet>(
+    `https://api.tcgdex.net/v2/${encodeURIComponent(language)}/sets/${encodeURIComponent(setCode)}`,
+    undefined,
+    { attempts: 2, timeoutMs: 20_000 },
+  )
+}
+
+function briefMatchesLocalizedNames(
+  brief: TcgDexBrief,
+  localizedNames: string[],
+) {
+  const cardName = normalizedText(brief.name)
+  return localizedNames.some((name) =>
+    cardName.includes(normalizedText(name)),
+  )
+}
+
+function filterTcgdexBriefs(
+  briefs: TcgDexBrief[],
+  options: {
+    number: string
+    name: string
+    crossLanguageEnglishName: boolean
+    localizedSearchNames: string[]
+  },
+) {
+  const {
+    number,
+    name,
+    crossLanguageEnglishName,
+    localizedSearchNames,
+  } = options
+
+  return briefs.filter((brief) => {
+    if (
+      number &&
+      comparableCardNumber(String(brief.localId)) !==
+        comparableCardNumber(number)
+    ) {
+      return false
+    }
+
+    if (name) {
+      if (crossLanguageEnglishName) {
+        if (!briefMatchesLocalizedNames(brief, localizedSearchNames)) {
+          return false
+        }
+      } else if (
+        !normalizedText(brief.name).includes(normalizedText(name))
+      ) {
+        return false
+      }
+    }
+
+    return true
+  })
+}
+
+async function enrichTcgdexBriefs(
+  language: string,
+  briefs: TcgDexBrief[],
+) {
+  const enriched: Array<{
+    brief: TcgDexBrief
+    detail: TcgDexDetail | null
+  }> = []
+
+  for (let index = 0; index < briefs.length; index += 4) {
+    const batch = briefs.slice(index, index + 4)
+    const batchResults = await Promise.all(
+      batch.map(async (brief) => {
+        try {
+          const detail = await fetchJson<TcgDexDetail>(
+            `https://api.tcgdex.net/v2/${encodeURIComponent(language)}/cards/${encodeURIComponent(brief.id)}`,
+            undefined,
+            { attempts: 1, timeoutMs: 10_000 },
+          )
+          return { brief, detail }
+        } catch {
+          // The brief already matched all user-entered criteria.
+          return { brief, detail: null }
+        }
+      }),
+    )
+    enriched.push(...batchResults)
+  }
+
+  return enriched
+}
+async function searchTcgdexLanguage(
+  input: CatalogSearchInput,
+  language: string,
+): Promise<CardCatalogCandidate[]> {
+  const itemLanguage = input.itemLanguage || 'Korean'
+  const number = cardNumberNumerator(input.cardNumber)
+  const setCode = input.setCode?.trim() || ''
+  const name = input.name?.trim() || ''
+
+  const crossLanguageEnglishName =
+    Boolean(name) && language !== 'en' && containsLatinLetter(name)
+
+  let localizedSearchNames: string[] = []
+  let crossLanguageNameMode: CrossLanguageNamePlan['mode'] | null = null
+
+  if (crossLanguageEnglishName) {
+    const plan = await resolveCrossLanguageEnglishName(name)
+    localizedSearchNames = plan.localizedSearchNames
+    crossLanguageNameMode = plan.mode
+
+    // Do not silently discard either the species or a card-name modifier.
+    // If we cannot produce a trustworthy Japanese name, let searchTcgdex()
+    // continue to the English TCGdex catalog instead.
+    if (!localizedSearchNames.length) return []
+  }
+
+  let matchedBriefs: TcgDexBrief[] = []
+
+  if (setCode) {
+    // A set code is a structural identifier, not a free-text card filter.
+    // Fetch the set directly and filter its card list locally. TCGdex officially
+    // exposes the complete card list on GET /sets/{setId}.
+    const set = await fetchTcgdexSet(language, setCode)
+    matchedBriefs = filterTcgdexBriefs(set.cards ?? [], {
+      number,
+      name,
+      crossLanguageEnglishName,
+      localizedSearchNames,
+    })
+  } else if (number) {
+    // localId is not globally unique, so get every card with that local number
+    // and apply the optional Pokemon-name criterion locally.
+    const numberBriefs = await fetchTcgdexBriefs(
+      language,
+      'localId',
+      number,
+    )
+    matchedBriefs = filterTcgdexBriefs(numberBriefs, {
+      number,
+      name,
+      crossLanguageEnglishName,
+      localizedSearchNames,
+    })
+  } else if (name) {
+    if (crossLanguageEnglishName) {
+      const nameLists = await Promise.all(
+        localizedSearchNames.map((localizedName) =>
+          fetchTcgdexBriefs(language, 'name', localizedName),
+        ),
+      )
+      matchedBriefs = filterTcgdexBriefs(
+        unionBriefLists(nameLists),
+        {
+          number,
+          name,
+          crossLanguageEnglishName,
+          localizedSearchNames,
+        },
+      )
+    } else {
+      const nameBriefs = await fetchTcgdexBriefs(
+        language,
+        'name',
+        name,
+      )
+      matchedBriefs = filterTcgdexBriefs(nameBriefs, {
+        number,
+        name,
+        crossLanguageEnglishName,
+        localizedSearchNames,
+      })
+    }
+  }
+
+  matchedBriefs = matchedBriefs.slice(0, 24)
+  if (!matchedBriefs.length) return []
+
+  const enriched = await enrichTcgdexBriefs(language, matchedBriefs)
+
+  const englishNameCache = new Map<
+    number,
+    { pokemonNameEn: string | null; englishName: string | null }
+  >()
+
+  return Promise.all(
+    enriched.map(async ({ brief, detail }) => {
+      const localId = String(detail?.localId ?? brief.localId)
+      const printedTotal = detail?.set?.cardCount?.official ?? null
+      const variants = detail ? variantLabels(detail.variants) : []
+      const setCodeValue =
+        detail?.set?.id ?? brief.id.split('-')[0] ?? null
+      const dexId = detail?.dexId?.[0] ?? null
+
+      let pokemonNameEn: string | null = null
+      let englishName: string | null = null
+
+      if (language === 'en') {
+        englishName = detail?.name ?? brief.name
+        pokemonNameEn =
+          detail?.category === 'Pokemon'
+            ? stripPokemonCardSuffix(englishName)
+            : null
+      } else if (detail?.category === 'Pokemon' && dexId) {
+        const resolved = await resolveEnglishPokemonNames(
+          dexId,
+          detail.suffix,
+          englishNameCache,
+        )
+        pokemonNameEn = resolved.pokemonNameEn
+        englishName = resolved.englishName
+      }
+
+      const snapshot = detail
+        ? {
+            provider: 'tcgdex',
+            id: detail.id,
+            localizedName: detail.name,
+            localizedSearchNames,
+            crossLanguageNameMode,
+            englishName,
+            pokemonNameEn,
+            category: detail.category ?? null,
+            illustrator: detail.illustrator ?? null,
+            hp: detail.hp ?? null,
+            types: detail.types ?? [],
+            dexId: detail.dexId ?? [],
+            suffix: detail.suffix ?? null,
+            variants,
+            setCode: setCodeValue,
+            setName: detail.set?.name ?? null,
+            setTotal: detail.set?.cardCount?.total ?? null,
+            printedTotal,
+            detailEnriched: true,
+            searchLanguage: language,
+          }
+        : {
+            provider: 'tcgdex',
+            id: brief.id,
+            localizedName: brief.name,
+            localizedSearchNames,
+            crossLanguageNameMode,
+            localId,
+            setCode: setCodeValue,
+            detailEnriched: false,
+            searchLanguage: language,
+          }
+
+      return {
+        provider: 'tcgdex' as const,
+        providerCardId: detail?.id ?? brief.id,
+        catalogLanguage: language,
+        matchType: catalogMatchType(itemLanguage, language),
+        name: detail?.name ?? brief.name,
+        number: localId,
+        numberDisplay: displayCardNumber(localId, printedTotal),
+        setId: detail?.set?.id ?? setCodeValue,
+        setCode: setCodeValue,
+        setName: detail?.set?.name ?? null,
+        pokemonNameEn,
+        englishName,
+        rarity: detail?.rarity ?? null,
+        imageUrl: tcgdexImageUrl(detail?.image ?? brief.image, 'high'),
+        category: detail?.category ?? null,
+        illustrator: detail?.illustrator ?? null,
+        hp: detail?.hp === undefined ? null : String(detail.hp),
+        types: detail?.types ?? [],
+        variants,
+        snapshot,
+      } satisfies CardCatalogCandidate
+    }),
+  )
+}
+
+function interleaveCatalogCandidates(
+  lists: CardCatalogCandidate[][],
+  limit = 24,
+) {
+  const result: CardCatalogCandidate[] = []
+  const seen = new Set<string>()
+  let index = 0
+
+  while (result.length < limit) {
+    let added = false
+
+    for (const list of lists) {
+      const candidate = list[index]
+      if (!candidate) continue
+
+      const key = `${candidate.catalogLanguage}:${candidate.providerCardId}`
+      if (!seen.has(key)) {
+        seen.add(key)
+        result.push(candidate)
+        added = true
+
+        if (result.length >= limit) return result
+      }
+    }
+
+    if (!added) break
+    index += 1
+  }
+
+  return result
+}
+
+async function searchTcgdex(input: CatalogSearchInput): Promise<CardCatalogCandidate[]> {
+  const itemLanguage = input.itemLanguage || 'Korean'
+  const languages = tcgdexSearchLanguages(itemLanguage)
+  const warnings: Error[] = []
+
+  const mergeModifierResults =
+    Boolean(input.name) &&
+    containsLatinLetter(input.name ?? '') &&
+    Boolean(knownEnglishCardNameModifier(input.name ?? '')) &&
+    languages.length > 1
+
+  const resultsByLanguage: CardCatalogCandidate[][] = []
+
+  for (const language of languages) {
+    try {
+      const candidates = await searchTcgdexLanguage(input, language)
+
+      if (!mergeModifierResults) {
+        if (candidates.length) return candidates
+        continue
+      }
+
+      resultsByLanguage.push(candidates)
+    } catch (error) {
+      warnings.push(error instanceof Error ? error : new Error(String(error)))
+      if (mergeModifierResults) resultsByLanguage.push([])
+    }
+  }
+
+  if (mergeModifierResults) {
+    const merged = interleaveCatalogCandidates(resultsByLanguage)
+    if (merged.length) return merged
+  }
+
+  if (warnings.length === languages.length && warnings.length) throw warnings[0]
+  return []
+}
+
+function luceneValue(value: string) {
+  return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+}
+
+function luceneToken(value: string) {
+  return value.replace(/([+\-!(){}\[\]^"~*?:\\/])/g, '\\$1')
+}
+
+async function searchPokemonTcg(input: CatalogSearchInput): Promise<CardCatalogCandidate[]> {
+  const clauses: string[] = []
+  const number = cardNumberNumerator(input.cardNumber)
+  const setCode = input.setCode?.trim() || ''
+
+  if (input.name) clauses.push(`name:${luceneValue(input.name.trim())}`)
+  if (number) clauses.push(`number:${luceneToken(number)}`)
+  if (setCode) clauses.push(`set.ptcgoCode:${luceneValue(setCode)}`)
+  if (!clauses.length) return []
+
+  const params = new URLSearchParams({
+    q: clauses.join(' '),
+    page: '1',
+    pageSize: '16',
+    select:
+      'id,name,supertype,subtypes,hp,types,number,artist,rarity,set,images',
+  })
+  const headers: Record<string, string> = {}
+  const apiKey = process.env.POKEMON_TCG_API_KEY?.trim()
+  if (apiKey) headers['X-Api-Key'] = apiKey
+
+  const response = await fetchJson<{ data?: PokemonTcgCard[] }>(
+    `https://api.pokemontcg.io/v2/cards?${params.toString()}`,
+    { headers },
+    { attempts: 3, timeoutMs: 20_000 },
+  )
+  const itemLanguage = input.itemLanguage || 'Korean'
+
+  return (response.data ?? [])
+    .filter((card) => {
+      if (input.name && !normalizedText(card.name).includes(normalizedText(input.name))) {
+        return false
+      }
+      if (number && comparableCardNumber(card.number) !== comparableCardNumber(number)) {
+        return false
+      }
+      if (
+        setCode &&
+        normalizedText(card.set?.ptcgoCode) !== normalizedText(setCode)
+      ) {
+        return false
+      }
+      return true
+    })
+    .map((card) => {
+      const printedTotal = card.set?.printedTotal ?? null
+      const setCodeValue = card.set?.ptcgoCode ?? card.set?.id ?? null
+      const pokemonNameEn =
+        card.supertype === 'Pokémon' || card.supertype === 'Pokemon'
+          ? stripPokemonCardSuffix(card.name)
+          : null
+
+      const snapshot = {
+        provider: 'pokemontcg',
+        id: card.id,
+        englishName: card.name,
+        pokemonNameEn,
+        supertype: card.supertype ?? null,
+        subtypes: card.subtypes ?? [],
+        illustrator: card.artist ?? null,
+        hp: card.hp ?? null,
+        types: card.types ?? [],
+        setCode: setCodeValue,
+        setName: card.set?.name ?? null,
+        providerSetId: card.set?.id ?? null,
+        printedTotal,
+        setTotal: card.set?.total ?? null,
+      }
+
+      return {
+        provider: 'pokemontcg' as const,
+        providerCardId: card.id,
+        catalogLanguage: 'en',
+        matchType: itemLanguage === 'English' ? 'exact_language' : 'equivalent_language',
+        name: card.name,
+        number: card.number ?? null,
+        numberDisplay: displayCardNumber(card.number ?? null, printedTotal),
+        setId: card.set?.id ?? null,
+        setCode: setCodeValue,
+        setName: card.set?.name ?? null,
+        pokemonNameEn,
+        englishName: card.name,
+        rarity: card.rarity ?? null,
+        imageUrl: card.images?.large ?? card.images?.small ?? null,
+        category: card.supertype ?? null,
+        illustrator: card.artist ?? null,
+        hp: card.hp ?? null,
+        types: card.types ?? [],
+        variants: card.subtypes ?? [],
+        snapshot,
+      } satisfies CardCatalogCandidate
+    })
+}
+
+export async function searchCardCatalog(input: CatalogSearchInput) {
+  const warnings: string[] = []
+  let candidates: CardCatalogCandidate[] = []
+
+  try {
+    candidates = await searchTcgdex(input)
+  } catch (error) {
+    warnings.push(
+      error instanceof Error
+        ? `TCGdex: ${error.message}`
+        : 'TCGdex konnte nicht abgefragt werden.',
+    )
+  }
+
+  return {
+    candidates: candidates.slice(0, 24),
+    warnings,
+    tcgdexLanguage:
+      input.itemLanguage === 'Korean'
+        ? 'ja'
+        : tcgdexCatalogLanguage(input.itemLanguage || 'Korean'),
+  }
+}
+
