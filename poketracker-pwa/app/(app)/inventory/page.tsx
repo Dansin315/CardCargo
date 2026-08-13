@@ -319,6 +319,7 @@ export default async function InventoryPage() {
       sourceLabel: string
       sourceHref: string | null
       pokemonSpecies: string[]
+      pokemonNameEn: string | null
       purchasedAt: string | null
       arrivedAt: string | null
       sourceImages: InventoryWorkspaceSourceImage[]
@@ -352,6 +353,8 @@ export default async function InventoryPage() {
               snapshotEnglishName(item.catalog_snapshot) || item.pokemon_name_en || null,
             )
 
+      const pokemonNameEn =
+        item.pokemon_name_en || (pokemonSpecies.length ? pokemonSpecies.join(', ') : null)
       const sourceImages = [
         ...(item.purchase_id ? purchaseImagesByPurchase.get(item.purchase_id) ?? [] : []),
         ...(linkedPackageId ? packageImagesByPackage.get(linkedPackageId) ?? [] : []),
@@ -363,6 +366,7 @@ export default async function InventoryPage() {
         sourceLabel,
         sourceHref,
         pokemonSpecies,
+        pokemonNameEn,
         purchasedAt: purchase?.purchased_at || null,
         arrivedAt: linkedPackageId ? deliveredAtByPackageId.get(linkedPackageId) || null : null,
         sourceImages,
@@ -402,7 +406,7 @@ export default async function InventoryPage() {
       id: unit.id,
       purchaseItemId: unit.purchase_item_id || null,
       itemName: unit.item_name,
-      pokemonNameEn: unit.pokemon_name_en || null,
+      pokemonNameEn: unit.pokemon_name_en || meta?.pokemonNameEn || (pokemonSpecies.length ? pokemonSpecies.join(', ') : null),
       pokemonSpecies,
       setName: unit.set_name || null,
       setCode: unit.set_code || null,

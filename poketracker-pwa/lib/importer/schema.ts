@@ -68,15 +68,15 @@ export const createPurchaseSchema = z
         'cancelled',
       ])
       .default('ordered'),
-    remoteImageUrls: z.array(z.string().url().max(2_000)).max(8).default([]),
-    stagedImages: z.array(stagedImageSchema).max(8).default([]),
+    remoteImageUrls: z.array(z.string().url().max(2_000)).max(12).default([]),
+    stagedImages: z.array(stagedImageSchema).max(12).default([]),
   })
   .superRefine((value, context) => {
-    if (value.remoteImageUrls.length + value.stagedImages.length > 8) {
+    if (value.remoteImageUrls.length + value.stagedImages.length > 12) {
       context.addIssue({
         code: 'custom',
         path: ['remoteImageUrls'],
-        message: 'Pro Angebot können höchstens acht Bilder archiviert werden.',
+        message: 'Pro Angebot können höchstens zwölf Bilder archiviert werden.',
       })
     }
   })

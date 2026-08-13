@@ -11,6 +11,11 @@ import {
 } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import {
+  inventoryLanguageFlag,
+  inventoryLanguageLabel,
+  inventoryLanguageOptions,
+} from '@/lib/inventory-languages'
 
 export type InventoryWorkspaceImage = {
   id: string
@@ -255,8 +260,11 @@ function csvCell(value: unknown) {
   return `"${String(value ?? '').replaceAll('"', '""')}"`
 }
 
-function speciesLabel(species: string[]) {
-  return species.length ? species.join(', ') : 'Pokémon-Art nicht gesetzt'
+function speciesLabel(species: string[], pokemonNameEn?: string | null, itemName?: string) {
+  if (species.length) return species.join(', ')
+  const derived = deriveSpeciesFromEditableFields(itemName ?? '', pokemonNameEn ?? '')
+  if (derived.length) return derived.join(', ')
+  return pokemonNameEn?.trim() || 'Pokémon-Art nicht gesetzt'
 }
 
 function rowSpeciesSearch(row: DisplayRow) {
@@ -380,12 +388,14 @@ function AccordionFilter({
   options,
   onChange,
   accent = 'green',
+  formatOption,
 }: {
   label: string
   value: string
   options: string[]
   onChange: (value: string) => void
   accent?: 'green' | 'brown'
+  formatOption?: (value: string) => string
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -408,7 +418,7 @@ function AccordionFilter({
       >
         <span>
           <small>{label}</small>
-          <strong>{value}</strong>
+          <strong>{formatOption ? formatOption(value) : value}</strong>
         </span>
         <span className={`inv-chevron ${open ? 'is-open' : ''}`}>
           <ChevronIcon />
@@ -427,7 +437,7 @@ function AccordionFilter({
                 setOpen(false)
               }}
             >
-              {option}
+              {formatOption ? formatOption(option) : option}
             </button>
           ))}
         </div>
@@ -558,7 +568,11 @@ function InventoryEditorModal({
             </label>
             <label>
               <span>Sprache</span>
-              <input value={draft.language} onChange={(event) => field('language', event.target.value)} placeholder="Korean" />
+              <select value={draft.language} onChange={(event) => field('language', event.target.value)}>
+                {inventoryLanguageOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.flag} {option.label}</option>
+                ))}
+              </select>
             </label>
           </div>
 
@@ -662,6 +676,119 @@ function InventoryEditorModal({
             <button className="inv-button inv-button-primary" type="submit" disabled={saving}>
               {saving ? 'Speichern …' : mode === 'create' ? 'Einzelkarte hinzufügen' : 'Änderungen speichern'}
             </button>
+          </footer>
+        </form>
+      </section>
+    </div>
+  )
+}
+
+
+function BulkEditModal({
+  ids,
+  onClose,
+  onSaved,
+}: {
+  ids: string[]
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const [enabled, setEnabled] = useState({
+    notes: false,
+    purchasedAt: false,
+    arrivedAt: false,
+    language: false,
+    status: false,
+  })
+  const [notes, setNotes] = useState('')
+  const [purchasedAt, setPurchasedAt] = useState('')
+  const [arrivedAt, setArrivedAt] = useState('')
+  const [language, setLanguage] = useState('Korean')
+  const [status, setStatus] = useState('in_collection')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const changes: Record<string, string | null> = {}
+    if (enabled.notes) changes.notes = notes
+    if (enabled.purchasedAt) changes.purchasedAt = purchasedAt || null
+    if (enabled.arrivedAt) changes.arrivedAt = arrivedAt || null
+    if (enabled.language) changes.language = language
+    if (enabled.status) changes.status = status
+
+    if (!Object.keys(changes).length) {
+      setError('Wähle mindestens ein Feld für die Massenbearbeitung aus.')
+      return
+    }
+
+    setSaving(true)
+    setError(null)
+    try {
+      const response = await fetch('/api/inventory/units/bulk', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ ids, changes }),
+      })
+      const payload = (await response.json()) as { error?: string }
+      if (!response.ok) throw new Error(payload.error || 'Massenbearbeitung konnte nicht gespeichert werden.')
+      onSaved()
+      onClose()
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Massenbearbeitung konnte nicht gespeichert werden.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="inv-modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section className="inv-modal inv-editor-modal" role="dialog" aria-modal="true" aria-labelledby="inventory-bulk-title" onMouseDown={(event) => event.stopPropagation()}>
+        <header className="inv-modal-head">
+          <div>
+            <span className="inv-kicker">{ids.length} Inventareinträge ausgewählt</span>
+            <h2 id="inventory-bulk-title">Massenbearbeitung</h2>
+          </div>
+          <button type="button" className="inv-modal-close" onClick={onClose} aria-label="Schließen">×</button>
+        </header>
+        <form className="inv-editor-form" onSubmit={submit}>
+          <p className="inv-muted-copy">Nur aktivierte Felder werden auf alle ausgewählten Karten angewendet. Alle anderen Werte bleiben unverändert.</p>
+
+          <div className="inv-editor-grid">
+            <label>
+              <span><input type="checkbox" checked={enabled.purchasedAt} onChange={(event) => setEnabled((current) => ({ ...current, purchasedAt: event.target.checked }))} /> Gekauft am ändern</span>
+              <input type="date" value={purchasedAt} disabled={!enabled.purchasedAt} onChange={(event) => setPurchasedAt(event.target.value)} />
+            </label>
+            <label>
+              <span><input type="checkbox" checked={enabled.arrivedAt} onChange={(event) => setEnabled((current) => ({ ...current, arrivedAt: event.target.checked }))} /> Angekommen am ändern</span>
+              <input type="date" value={arrivedAt} disabled={!enabled.arrivedAt} onChange={(event) => setArrivedAt(event.target.value)} />
+            </label>
+            <label>
+              <span><input type="checkbox" checked={enabled.language} onChange={(event) => setEnabled((current) => ({ ...current, language: event.target.checked }))} /> Sprache ändern</span>
+              <select value={language} disabled={!enabled.language} onChange={(event) => setLanguage(event.target.value)}>
+                {inventoryLanguageOptions.filter((option) => option.value !== 'Other').map((option) => (
+                  <option key={option.value} value={option.value}>{option.flag} {option.label}</option>
+                ))}
+                <option value="Other">{inventoryLanguageFlag('Other')} Andere</option>
+              </select>
+            </label>
+            <label>
+              <span><input type="checkbox" checked={enabled.status} onChange={(event) => setEnabled((current) => ({ ...current, status: event.target.checked }))} /> Status ändern</span>
+              <select value={status} disabled={!enabled.status} onChange={(event) => setStatus(event.target.value)}>
+                {EDITABLE_STATUSES.map((value) => <option key={value} value={value}>{STATUS_LABELS[value]}</option>)}
+              </select>
+            </label>
+          </div>
+
+          <label className="inv-editor-notes">
+            <span><input type="checkbox" checked={enabled.notes} onChange={(event) => setEnabled((current) => ({ ...current, notes: event.target.checked }))} /> Kommentar / Notiz ändern</span>
+            <textarea rows={4} value={notes} disabled={!enabled.notes} onChange={(event) => setNotes(event.target.value)} placeholder="Gemeinsamer Kommentar für alle ausgewählten Karten" />
+          </label>
+
+          {error ? <div className="inv-alert inv-editor-error">{error}</div> : null}
+          <footer className="inv-modal-actions">
+            <button className="inv-button inv-button-muted" type="button" onClick={onClose}>Abbrechen</button>
+            <button className="inv-button inv-button-primary" type="submit" disabled={saving}>{saving ? 'Speichern …' : 'Auf Auswahl anwenden'}</button>
           </footer>
         </form>
       </section>
@@ -930,6 +1057,7 @@ export function InventoryWorkspace({
   const [editorMode, setEditorMode] = useState<'create' | 'edit' | null>(null)
   const [editingUnit, setEditingUnit] = useState<InventoryWorkspaceUnit | null>(null)
   const [imageUnit, setImageUnit] = useState<InventoryWorkspaceUnit | null>(null)
+  const [bulkEditOpen, setBulkEditOpen] = useState(false)
 
   const unitById = useMemo(() => new Map(units.map((unit) => [unit.id, unit])), [units])
 
@@ -1009,10 +1137,11 @@ export function InventoryWorkspace({
     return [...physicalRows, ...deliveryRows]
   }, [units, pendingItems])
 
-  const languageOptions = useMemo(
-    () => ['Alle', ...uniqueValues(rows.map((row) => row.language))],
-    [rows],
-  )
+  const languageOptions = useMemo(() => {
+    const configured = inventoryLanguageOptions.map((option) => String(option.value))
+    const extras = uniqueValues(rows.map((row) => row.language)).filter((value) => !configured.includes(value))
+    return ['Alle', ...configured, ...extras]
+  }, [rows])
   const expansionOptions = useMemo(
     () => [
       'Alle',
@@ -1379,7 +1508,7 @@ export function InventoryWorkspace({
               />
             </div>
 
-            <AccordionFilter label="Sprache" value={language} options={languageOptions} onChange={setLanguage} />
+            <AccordionFilter label="Sprache" value={language} options={languageOptions} onChange={setLanguage} formatOption={(value) => value === 'Alle' ? 'Alle' : inventoryLanguageLabel(value)} />
             <AccordionFilter label="Set / Erweiterung" value={expansion} options={expansionOptions} onChange={setExpansion} />
             <AccordionFilter label="Seltenheit" value={rarity} options={rarityOptions} onChange={setRarity} />
             <AccordionFilter label="Mindestzustand" value={condition} options={conditionOptions} onChange={setCondition} />
@@ -1429,15 +1558,15 @@ export function InventoryWorkspace({
             </div>
 
             <div className="inv-table-actions">
+              <button className="inv-button inv-button-muted" type="button" onClick={() => exportRows(filtered)} disabled={!filtered.length}>CSV exportieren</button>
+              <button className="inv-button inv-button-muted" type="button" disabled={!selected.size} onClick={() => setBulkEditOpen(true)}>Massenbearbeitung</button>
               {selected.size ? (
                 <>
                   <span>{selected.size} ausgewählt</span>
                   <button className="inv-button inv-button-muted" type="button" onClick={() => exportRows(filtered.filter((row) => row.unitId && selected.has(row.unitId)))}>Auswahl exportieren</button>
                   <button className="inv-button inv-button-danger" type="button" disabled={deleting} onClick={deleteSelected}>{deleting ? 'Löschen …' : 'Löschen'}</button>
                 </>
-              ) : (
-                <button className="inv-button inv-button-muted" type="button" onClick={() => exportRows(filtered)} disabled={!filtered.length}>CSV exportieren</button>
-              )}
+              ) : null}
             </div>
           </header>
 
@@ -1449,9 +1578,9 @@ export function InventoryWorkspace({
                     <input type="checkbox" checked={allSelected} onChange={toggleAll} aria-label="Alle sichtbaren Inventareinträge auswählen" />
                   </th>
                   <th>Karte</th>
+                  <th>Sprache</th>
                   <th>Set</th>
                   <th>Nr.</th>
-                  <th>Sprache</th>
                   <th>Seltenheit</th>
                   <th>Zustand</th>
                   <th>Grading</th>
@@ -1499,15 +1628,17 @@ export function InventoryWorkspace({
                           </div>
                           <div>
                             <strong>{row.itemName}{row.quantity > 1 ? ` · ${row.quantity}×` : ''}</strong>
-                            <small className="inv-species-line">{speciesLabel(row.pokemonSpecies)}</small>
+                            <small className="inv-species-line">{speciesLabel(row.pokemonSpecies, row.pokemonNameEn, row.itemName)}</small>
                           </div>
+                        </td>
+                        <td title={row.language ? inventoryLanguageLabel(row.language) : undefined} aria-label={row.language ? inventoryLanguageLabel(row.language) : 'Sprache nicht gesetzt'}>
+                          {row.language ? <span aria-hidden="true">{inventoryLanguageFlag(row.language)}</span> : '–'}
                         </td>
                         <td>
                           <strong className="inv-table-main">{row.setName || '–'}</strong>
                           <small>{row.setCode || 'Kein Setcode'}</small>
                         </td>
                         <td className="inv-mono">{row.cardNumber || '–'}</td>
-                        <td>{row.language || '–'}</td>
                         <td>{row.rarity || '–'}</td>
                         <td>{row.kind === 'pending' ? '–' : row.condition || 'Nicht bewertet'}</td>
                         <td>
@@ -1588,6 +1719,16 @@ export function InventoryWorkspace({
         />
       ) : null}
 
+      {bulkEditOpen ? (
+        <BulkEditModal
+          ids={[...selected]}
+          onClose={() => setBulkEditOpen(false)}
+          onSaved={() => {
+            setSelected(new Set())
+            router.refresh()
+          }}
+        />
+      ) : null}
       {imageUnit ? (
         <InventoryImagesModal
           userId={userId}

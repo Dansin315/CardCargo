@@ -620,26 +620,14 @@ async function fetchTcgdexBriefs(
 async function resolveEnglishPokemonNames(
   dexId: number | null,
   suffix: string | null | undefined,
-  cache: Map<string, { pokemonNameEn: string | null; englishName: string | null }>,
+  cache: Map<number, { pokemonNameEn: string | null; englishName: string | null }>,
 ) {
   if (!dexId) return { pokemonNameEn: null, englishName: null }
-
-  // The full English card name also depends on the suffix (ex, V, GX, ...),
-  // so a dexId-only cache can leak a name from another card form.
-  const cacheKey = `${dexId}:${normalizedText(suffix)}`
-  const cached = cache.get(cacheKey)
+  const cached = cache.get(dexId)
   if (cached) return cached
 
-  // PokeAPI is the authoritative fallback for the species identity. This keeps
-  // pokemonNameEn stable even when an English TCGdex card lookup is incomplete.
-  const speciesByDexId = await resolvePokemonSpeciesNames([dexId])
-  const speciesEnglish = speciesByDexId.get(dexId)?.english?.trim() || null
-
   try {
-    // IMPORTANT: TCGdex's default filter is a contains/lax filter. Without eq:
-    // dexId=9 can also match values such as 89, which previously made
-    // Blastoise (#9) resolve to Muk (#89). Always request strict equality.
-    const params = new URLSearchParams({ dexId: `eq:${dexId}` })
+    const params = new URLSearchParams({ dexId: String(dexId) })
     const briefs = await fetchJson<TcgDexBrief[]>(
       `https://api.tcgdex.net/v2/en/cards?${params.toString()}`,
       undefined,
@@ -647,9 +635,15 @@ async function resolveEnglishPokemonNames(
     )
 
     const names = [...new Set(briefs.map((brief) => brief.name.trim()).filter(Boolean))]
+    if (!names.length) {
+      const empty = { pokemonNameEn: null, englishName: null }
+      cache.set(dexId, empty)
+      return empty
+    }
+
     const speciesCandidates = [...new Set(names.map(stripPokemonCardSuffix).filter(Boolean))]
       .sort((a, b) => a.length - b.length || a.localeCompare(b))
-    const pokemonNameEn = speciesEnglish ?? speciesCandidates[0] ?? null
+    const pokemonNameEn = speciesCandidates[0] ?? null
 
     const wantedSuffix = normalizedText(suffix)
     const matchingSuffixNames = wantedSuffix
@@ -657,24 +651,22 @@ async function resolveEnglishPokemonNames(
           .filter((name) => normalizedText(name).endsWith(wantedSuffix))
           .sort((a, b) => a.length - b.length || a.localeCompare(b))
       : []
+
     const englishName =
       matchingSuffixNames[0] ??
       (pokemonNameEn ? appendSuffix(pokemonNameEn, suffix) : null)
 
     const resolved = { pokemonNameEn, englishName }
-    cache.set(cacheKey, resolved)
+    cache.set(dexId, resolved)
     return resolved
   } catch {
-    // A failed TCGdex enrichment must not erase a species that PokeAPI already
-    // resolved successfully (e.g. Japanese Mew -> Mew).
-    const fallback = {
-      pokemonNameEn: speciesEnglish,
-      englishName: speciesEnglish ? appendSuffix(speciesEnglish, suffix) : null,
-    }
-    cache.set(cacheKey, fallback)
-    return fallback
+    const empty = { pokemonNameEn: null, englishName: null }
+    cache.set(dexId, empty)
+    return empty
   }
 }
+
+
 async function fetchTcgdexSet(language: string, setCode: string) {
   return fetchJson<TcgDexSet>(
     `https://api.tcgdex.net/v2/${encodeURIComponent(language)}/sets/${encodeURIComponent(setCode)}`,
@@ -780,13 +772,11 @@ async function searchTcgdexLanguage(
   let localizedSearchNames: string[] = []
   let crossLanguageNameMode: CrossLanguageNamePlan['mode'] | null = null
 
-  let crossLanguageDexIds: number[] = []
   if (crossLanguageEnglishName) {
     const plan = await resolveCrossLanguageEnglishName(name)
     localizedSearchNames = plan.localizedSearchNames
     crossLanguageNameMode = plan.mode
 
-    crossLanguageDexIds = plan.dexIds
     // Do not silently discard either the species or a card-name modifier.
     // If we cannot produce a trustworthy Japanese name, let searchTcgdex()
     // continue to the English TCGdex catalog instead.
@@ -857,7 +847,7 @@ async function searchTcgdexLanguage(
   const enriched = await enrichTcgdexBriefs(language, matchedBriefs)
 
   const englishNameCache = new Map<
-    string,
+    number,
     { pokemonNameEn: string | null; englishName: string | null }
   >()
 
@@ -868,11 +858,8 @@ async function searchTcgdexLanguage(
       const variants = detail ? variantLabels(detail.variants) : []
       const setCodeValue =
         detail?.set?.id ?? brief.id.split('-')[0] ?? null
-      const detailDexId =
-        detail?.dexId?.find((value) => Number.isInteger(value) && value > 0) ?? null
-      const dexId =
-        detailDexId ??
-        (crossLanguageDexIds.length === 1 ? crossLanguageDexIds[0] : null)
+      const dexId = detail?.dexId?.[0] ?? null
+
       let pokemonNameEn: string | null = null
       let englishName: string | null = null
 
@@ -882,29 +869,14 @@ async function searchTcgdexLanguage(
           detail?.category === 'Pokemon'
             ? stripPokemonCardSuffix(englishName)
             : null
-      } else if (
-        dexId &&
-        (detail?.category === 'Pokemon' ||
-          (crossLanguageEnglishName && crossLanguageDexIds.length === 1))
-      ) {
+      } else if (detail?.category === 'Pokemon' && dexId) {
         const resolved = await resolveEnglishPokemonNames(
           dexId,
-          detail?.suffix ?? extractPokemonCardSuffix(detail?.name ?? brief.name),
+          detail.suffix,
           englishNameCache,
         )
         pokemonNameEn = resolved.pokemonNameEn
         englishName = resolved.englishName
-
-        // When the search itself contained a supported English card-name
-        // modifier (Shining, Radiant, ...), preserve that full English card
-        // name while pokemonNameEn remains the bare species.
-        if (
-          crossLanguageNameMode === 'card-name' &&
-          crossLanguageDexIds.length === 1 &&
-          knownEnglishCardNameModifier(name)
-        ) {
-          englishName = appendSuffix(name, detail?.suffix)
-        }
       }
 
       const snapshot = detail
@@ -921,8 +893,6 @@ async function searchTcgdexLanguage(
             hp: detail.hp ?? null,
             types: detail.types ?? [],
             dexId: detail.dexId ?? [],
-            resolvedDexId: dexId,
-            dexIdSource: detailDexId ? 'tcgdex' : dexId ? 'cross-language' : null,
             suffix: detail.suffix ?? null,
             variants,
             setCode: setCodeValue,

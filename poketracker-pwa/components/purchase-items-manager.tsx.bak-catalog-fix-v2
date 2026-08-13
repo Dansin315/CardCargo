@@ -236,7 +236,7 @@ export function PurchaseItemsManager({
     const suggestedVariant = candidate.variants.length === 1 ? candidate.variants[0] : ''
     setDraft((current) => ({
       ...current,
-      itemName: candidate.name || current.itemName,
+      itemName: candidate.englishName || candidate.name || current.itemName,
       pokemonNameEn: candidate.pokemonNameEn || current.pokemonNameEn,
       cardNumber: current.cardNumber.trim() || candidate.numberDisplay || candidate.number || '',
       setCode: candidate.setCode || current.setCode,

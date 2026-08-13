@@ -34,8 +34,12 @@ export const itemLanguageOptions = [
   ['Italian', 'Italienisch'],
   ['Portuguese', 'Portugiesisch'],
   ['Chinese Traditional', 'Chinesisch (traditionell)'],
+  ['Chinese Simplified', 'Chinesisch (vereinfacht)'],
   ['Indonesian', 'Indonesisch'],
   ['Thai', 'Thailändisch'],
+  ['Dutch', 'Niederländisch'],
+  ['Polish', 'Polnisch'],
+  ['Russian', 'Russisch'],
   ['Other', 'Andere'],
 ] as const
 
@@ -47,9 +51,14 @@ const tcgdexLanguageMap: Record<string, string> = {
   Spanish: 'es',
   Italian: 'it',
   Portuguese: 'pt-br',
+  Korean: 'ko',
   'Chinese Traditional': 'zh-tw',
+  'Chinese Simplified': 'zh-cn',
   Indonesian: 'id',
   Thai: 'th',
+  Dutch: 'nl',
+  Polish: 'pl',
+  Russian: 'ru',
 }
 
 export function tcgdexCatalogLanguage(itemLanguage: string) {

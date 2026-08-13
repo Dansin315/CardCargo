@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import type { ListingPreview, PurchaseStatus, StagedImageInput } from '@/lib/types'
 
-const MAX_IMAGES = 8
+const MAX_IMAGES = 12
 const MAX_FILE_BYTES = 6 * 1024 * 1024
 const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
 

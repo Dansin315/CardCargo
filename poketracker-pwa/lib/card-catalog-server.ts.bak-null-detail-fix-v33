@@ -889,7 +889,7 @@ async function searchTcgdexLanguage(
       ) {
         const resolved = await resolveEnglishPokemonNames(
           dexId,
-          detail?.suffix ?? extractPokemonCardSuffix(detail?.name ?? brief.name),
+          detail.suffix,
           englishNameCache,
         )
         pokemonNameEn = resolved.pokemonNameEn
