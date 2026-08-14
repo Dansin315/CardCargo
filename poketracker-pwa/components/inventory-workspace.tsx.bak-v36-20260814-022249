@@ -556,10 +556,6 @@ function InventoryEditorModal({
               initialCardNumber={draft.cardNumber}
               initialSetCode={draft.setCode}
               language={draft.language}
-              onLanguageChange={(nextLanguage) =>
-                setDraft((current) => ({ ...current, language: nextLanguage }))
-              }
-
               onSelect={(candidate) => {
                 setDraft((current) => {
                   const resolvedPokemonName = candidate.pokemonNameEn?.trim() || ''

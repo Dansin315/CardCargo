@@ -11,8 +11,6 @@ import {
 } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { InventoryLanguageFlag } from '@/components/inventory-language-flag'
-import { InventoryCatalogPicker } from '@/components/inventory-catalog-picker'
 import {
   inventoryLanguageFlag,
   inventoryLanguageLabel,
@@ -550,42 +548,6 @@ function InventoryEditorModal({
         </header>
 
         <form className="inv-editor-form" onSubmit={submit}>
-          {mode === 'create' ? (
-            <InventoryCatalogPicker
-              initialName={draft.itemName}
-              initialCardNumber={draft.cardNumber}
-              initialSetCode={draft.setCode}
-              language={draft.language}
-              onLanguageChange={(nextLanguage) =>
-                setDraft((current) => ({ ...current, language: nextLanguage }))
-              }
-
-              onSelect={(candidate) => {
-                setDraft((current) => {
-                  const resolvedPokemonName = candidate.pokemonNameEn?.trim() || ''
-                  const resolvedItemName =
-                    candidate.matchType === 'exact_language'
-                      ? candidate.name
-                      : current.itemName.trim() || candidate.englishName || candidate.name
-                  const resolvedSpecies = resolvedPokemonName
-                    ? deriveSpeciesFromEditableFields(resolvedItemName, resolvedPokemonName)
-                    : []
-                  return {
-                    ...current,
-                    itemName: resolvedItemName,
-                    pokemonNameEn: resolvedPokemonName || current.pokemonNameEn,
-                    pokemonSpecies: resolvedSpecies.length
-                      ? resolvedSpecies.join(', ')
-                      : current.pokemonSpecies,
-                    setName: candidate.setName || current.setName,
-                    setCode: candidate.setCode || current.setCode,
-                    cardNumber: candidate.number || current.cardNumber,
-                    rarity: candidate.rarity || current.rarity,
-                  }
-                })
-              }}
-            />
-          ) : null}
           <div className="inv-editor-grid inv-editor-grid-primary">
             <label>
               <span>Kartenname *</span>
@@ -1669,7 +1631,9 @@ export function InventoryWorkspace({
                             <small className="inv-species-line">{speciesLabel(row.pokemonSpecies, row.pokemonNameEn, row.itemName)}</small>
                           </div>
                         </td>
-                        <td title={row.language ? inventoryLanguageLabel(row.language) : undefined} aria-label={row.language ? inventoryLanguageLabel(row.language) : 'Sprache nicht gesetzt'}><InventoryLanguageFlag language={row.language} /></td>
+                        <td title={row.language ? inventoryLanguageLabel(row.language) : undefined} aria-label={row.language ? inventoryLanguageLabel(row.language) : 'Sprache nicht gesetzt'}>
+                          {row.language ? <span aria-hidden="true">{inventoryLanguageFlag(row.language)}</span> : '–'}
+                        </td>
                         <td>
                           <strong className="inv-table-main">{row.setName || '–'}</strong>
                           <small>{row.setCode || 'Kein Setcode'}</small>

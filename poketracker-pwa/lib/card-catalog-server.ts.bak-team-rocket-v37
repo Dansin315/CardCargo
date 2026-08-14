@@ -234,7 +234,6 @@ const JAPANESE_CARD_NAME_PREFIXES: Record<string, string[]> = {
   dark: ['わるい'],
   light: ['やさしい'],
   "rocket's": ['ロケット団の', 'R団の'],
-  "team rocket's": ['ロケット団の', 'R団の'],
   birthday: ['おたんじょうび'],
   surfing: ['なみのり'],
   flying: ['そらをとぶ'],
@@ -258,36 +257,8 @@ function normalizedEnglishModifier(value: string) {
     .replace(/\s+/g, ' ')
 }
 
-function parseTeamRocketSearch(value: string) {
-  const clean = value
-    .trim()
-    .replace(/[’]/gu, "'")
-    .replace(/\s+/gu, ' ')
-
-  const match = clean.match(/^team\s+rocket(?:'?s)?(?:\s+(.+))?$/iu)
-  if (!match) return null
-
-  const subject = String(match[1] ?? '').trim()
-  return {
-    subject: subject || null,
-  }
-}
-
-function normalizeTeamRocketEnglishLookup(value: string) {
-  const parsed = parseTeamRocketSearch(value)
-  if (!parsed) return value.trim()
-
-  return parsed.subject
-    ? `Team Rocket's ${parsed.subject}`
-    : 'Team Rocket'
-}
-
 function knownEnglishCardNameModifier(value: string) {
   const normalized = normalizedEnglishModifier(value)
-
-  if (parseTeamRocketSearch(normalized)) {
-    return "team rocket's"
-  }
 
   return Object.keys(JAPANESE_CARD_NAME_PREFIXES).find(
     (modifier) =>
@@ -524,52 +495,13 @@ async function resolveCrossLanguageEnglishName(name: string) {
     } satisfies CrossLanguageNamePlan
   }
 
-  const teamRocketSearch = parseTeamRocketSearch(cleanName)
-  if (teamRocketSearch) {
-    const rocketPrefixes =
-      JAPANESE_CARD_NAME_PREFIXES["team rocket's"] ?? ['ロケット団の']
-
-    // "Team Rocket" alone intentionally means every Team Rocket Pokemon card.
-    if (!teamRocketSearch.subject) {
-      return {
-        mode: 'card-name',
-        dexIds: [],
-        localizedSearchNames: [...new Set(rocketPrefixes)],
-      } satisfies CrossLanguageNamePlan
-    }
-
-    // For "Team Rocket Mewtwo", "Team Rocket's Mewtwo ex", etc. resolve only
-    // the Pokemon part and then build the actual Japanese printed card name.
-    const speciesPlan = await resolveExactEnglishPokemonSpecies(
-      teamRocketSearch.subject,
-    )
-
-    if (speciesPlan?.localizedSearchNames.length) {
-      return {
-        mode: 'card-name',
-        dexIds: speciesPlan.dexIds,
-        localizedSearchNames: [
-          ...new Set(
-            rocketPrefixes.flatMap((prefix) =>
-              speciesPlan.localizedSearchNames.map(
-                (localizedName) => `${prefix}${localizedName}`,
-              ),
-            ),
-          ),
-        ],
-      } satisfies CrossLanguageNamePlan
-    }
-  }
-
-  const englishLookupName = normalizeTeamRocketEnglishLookup(cleanName)
-
   // Fast and robust path for exact English species names. This avoids the old
   // fan-out through many English TCGdex card details before we can translate a
   // simple name such as "Volcarona" to the Japanese species name.
   const exactSpecies = await resolveExactEnglishPokemonSpecies(cleanName)
   if (exactSpecies) return exactSpecies
 
-  const details = await fetchEnglishPokemonDetailsByName(englishLookupName)
+  const details = await fetchEnglishPokemonDetailsByName(cleanName)
   if (!details.length) {
     return {
       mode: 'card-name',
@@ -840,11 +772,7 @@ async function searchTcgdexLanguage(
   const itemLanguage = input.itemLanguage || 'Korean'
   const number = cardNumberNumerator(input.cardNumber)
   const setCode = input.setCode?.trim() || ''
-  const rawName = input.name?.trim() || ''
-  const name =
-    language === 'en'
-      ? normalizeTeamRocketEnglishLookup(rawName)
-      : rawName
+  const name = input.name?.trim() || ''
 
   const crossLanguageEnglishName =
     Boolean(name) && language !== 'en' && containsLatinLetter(name)
