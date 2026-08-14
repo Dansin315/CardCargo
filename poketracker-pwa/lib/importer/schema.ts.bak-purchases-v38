@@ -96,7 +96,6 @@ export const updatePurchaseSchema = z.object({
     .transform((value) => value.toUpperCase()),
   purchasedAt: dateOnlySchema.nullable(),
   stagedImages: z.array(stagedPurchaseImageSchema).max(12).default([]),
-  deleteImageIds: z.array(z.string().uuid()).max(24).default([]),
   deleteManualImageIds: z.array(z.string().uuid()).max(24).default([]),
   status: z.enum([
     'planned',

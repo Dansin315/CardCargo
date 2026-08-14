@@ -70,7 +70,7 @@ export async function archivePurchaseImages({
 
     const removableIds = new Set(
       (existingRows ?? [])
-        .filter((row) => deletedImageIds.includes(row.id))
+        .filter((row) => row.kind === 'manual' && deletedImageIds.includes(row.id))
         .map((row) => row.id),
     )
     const remainingRows = (existingRows ?? []).filter(
@@ -174,7 +174,7 @@ export async function archivePurchaseImages({
   }
 }
 
-export async function removePurchaseImages({
+export async function removeManualPurchaseImages({
   userId,
   purchaseId,
   imageIds,
@@ -188,13 +188,17 @@ export async function removePurchaseImages({
 
   const { data: rows, error: readError } = await admin
     .from('purchase_images')
-    .select('id, storage_path')
+    .select('id, storage_path, kind')
     .eq('purchase_id', purchaseId)
     .eq('user_id', userId)
     .in('id', imageIds)
 
   if (readError) throw new Error(readError.message)
   if (!rows?.length) return
+  if (rows.some((row) => row.kind !== 'manual')) {
+    throw new Error('Automatisch archivierte Angebotsbilder können nicht hier gelöscht werden.')
+  }
+
   const { count, error: countError } = await admin
     .from('purchase_images')
     .select('id', { count: 'exact', head: true })
@@ -233,6 +237,3 @@ export async function rollbackArchivedPurchaseImages(
   }
   await cleanupStorage(archived.storagePaths)
 }
-
-// Backwards-compatible alias for older imports.
-export const removeManualPurchaseImages = removePurchaseImages

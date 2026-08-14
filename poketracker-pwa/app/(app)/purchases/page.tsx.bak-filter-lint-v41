@@ -131,7 +131,6 @@ export default async function PurchasesPage({
       ) : null}
       <section className="panel">
         <PurchaseListWorkspace
-          key={[sort, statusFilter, dateFrom, dateTo, page].join('|')}
           purchases={purchases}
           page={page}
           totalPages={totalPages}

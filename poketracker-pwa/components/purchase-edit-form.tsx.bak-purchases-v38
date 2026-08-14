@@ -79,7 +79,7 @@ export function PurchaseEditForm({
   const [message, setMessage] = useState<string | null>(null)
   const [localImages, setLocalImages] = useState<LocalImage[]>([])
   const localImagesRef = useRef<LocalImage[]>([])
-  const [deleteImageIds, setDeleteImageIds] = useState<string[]>([])
+  const [deleteManualImageIds, setDeleteManualImageIds] = useState<string[]>([])
 
   useEffect(() => {
     localImagesRef.current = localImages
@@ -91,7 +91,7 @@ export function PurchaseEditForm({
     }
   }, [])
 
-  const remainingExistingImages = images.length - deleteImageIds.length
+  const remainingExistingImages = images.length - deleteManualImageIds.length
 
   function addLocalImages(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? [])
@@ -154,7 +154,7 @@ export function PurchaseEditForm({
   }
 
   function toggleExistingImageDeletion(imageId: string) {
-    setDeleteImageIds((current) =>
+    setDeleteManualImageIds((current) =>
       current.includes(imageId)
         ? current.filter((id) => id !== imageId)
         : [...current, imageId],
@@ -240,7 +240,7 @@ export function PurchaseEditForm({
           purchasedAt: String(form.get('purchasedAt') ?? '').trim() || null,
           status: String(form.get('status') ?? 'ordered'),
           stagedImages,
-          deleteImageIds,
+          deleteManualImageIds,
         }),
       })
 
@@ -336,8 +336,8 @@ export function PurchaseEditForm({
           <div>
             <h2>Archivierte Einkaufsbilder</h2>
             <p>
-              Bilder können ergänzt oder entfernt werden – auch automatisch importierte Angebotsbilder.
-              Mindestens ein Bild muss beim Einkauf archiviert bleiben.
+              Manuelle Bilder können ergänzt oder entfernt werden. Automatisch archivierte
+              Angebotsbilder bleiben geschützt.
             </p>
           </div>
           <span className="panel-note">
@@ -347,7 +347,7 @@ export function PurchaseEditForm({
 
         <div className="purchase-edit-image-grid">
           {images.map((image, index) => {
-            const marked = deleteImageIds.includes(image.id)
+            const marked = deleteManualImageIds.includes(image.id)
             return (
               <article className={marked ? 'marked-for-removal' : ''} key={image.id}>
                 {image.signedUrl ? (
@@ -359,20 +359,22 @@ export function PurchaseEditForm({
                   <strong>{image.originalFilename || `Bild ${index + 1}`}</strong>
                   <span>{purchaseImageCategoryLabels[image.category]}</span>
                   <span>
-                    {marked
-                      ? 'Wird beim Speichern entfernt'
-                      : image.kind === 'remote'
-                        ? 'Automatisch archiviert'
+                    {image.kind === 'remote'
+                      ? 'Automatisch archiviert'
+                      : marked
+                        ? 'Wird beim Speichern entfernt'
                         : 'Manuell hochgeladen'}
                   </span>
                 </div>
-                <button
-                  className="button button-ghost button-small"
-                  type="button"
-                  onClick={() => toggleExistingImageDeletion(image.id)}
-                >
-                  {marked ? 'Behalten' : 'Entfernen'}
-                </button>
+                {image.kind === 'manual' ? (
+                  <button
+                    className="button button-ghost button-small"
+                    type="button"
+                    onClick={() => toggleExistingImageDeletion(image.id)}
+                  >
+                    {marked ? 'Behalten' : 'Entfernen'}
+                  </button>
+                ) : null}
               </article>
             )
           })}
