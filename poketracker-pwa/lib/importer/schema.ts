@@ -83,8 +83,8 @@ export const createPurchaseSchema = z
 
 
 export const updatePurchaseSchema = z.object({
-  title: z.string().trim().min(1).max(300),
-  description: z.string().max(10_000).default(''),
+  title: z.string().trim().min(1).max(5_000),
+  description: z.string().max(50_000).default(''),
   sellerName: z.string().trim().max(200).default(''),
   priceAmount: z.number().nonnegative().max(999_999_999_999).nullable(),
   domesticShippingAmount: z.number().nonnegative().max(999_999_999_999).nullable(),

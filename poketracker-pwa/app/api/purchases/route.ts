@@ -26,11 +26,121 @@ async function removeStoragePaths(paths: string[]) {
   await admin.storage.from(BUCKET).remove(uniquePaths)
 }
 
+type GroupedListingEntry = {
+  sourceListingId: string | null
+  listingUrl: string
+  canonicalUrl: string | null
+  title: string
+  description: string
+  priceAmount: number | null
+  domesticShippingAmount: number | null
+  importedAt: string
+}
+
+type MergeCandidate = {
+  id: string
+  source_listing_id: string | null
+  listing_url: string
+  canonical_url: string | null
+  title: string
+  description: string | null
+  seller_name: string | null
+  price_amount: number | string | null
+  domestic_shipping_amount: number | string | null
+  price_currency: string
+  purchased_at: string | null
+  status: string
+  raw_metadata: unknown
+  created_at: string
+  purchase_images?: Array<{ id: string; sha256: string | null; position: number }>
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function nullableNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null
+  const number = Number(value)
+  return Number.isFinite(number) ? number : null
+}
+
+function normalizeSeller(value: string | null | undefined) {
+  return (value || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('en-US')
+}
+
+function normalizeUrlForCompare(value: string | null | undefined) {
+  return (value || '').trim().replace(/\/$/, '').toLocaleLowerCase('en-US')
+}
+
+function parseGroupedListingEntry(value: unknown): GroupedListingEntry | null {
+  if (!isRecord(value)) return null
+  if (typeof value.title !== 'string' || typeof value.listingUrl !== 'string') return null
+  return {
+    sourceListingId: typeof value.sourceListingId === 'string' ? value.sourceListingId : null,
+    listingUrl: value.listingUrl,
+    canonicalUrl: typeof value.canonicalUrl === 'string' ? value.canonicalUrl : null,
+    title: value.title,
+    description: typeof value.description === 'string' ? value.description : '',
+    priceAmount: nullableNumber(value.priceAmount),
+    domesticShippingAmount: nullableNumber(value.domesticShippingAmount),
+    importedAt: typeof value.importedAt === 'string' ? value.importedAt : new Date().toISOString(),
+  }
+}
+
+function groupedListingsFromPurchase(purchase: MergeCandidate): GroupedListingEntry[] {
+  const metadata = isRecord(purchase.raw_metadata) ? purchase.raw_metadata : {}
+  const rawEntries = Array.isArray(metadata.grouped_listings) ? metadata.grouped_listings : []
+  const entries = rawEntries
+    .map(parseGroupedListingEntry)
+    .filter((entry): entry is GroupedListingEntry => Boolean(entry))
+  if (entries.length) return entries
+
+  return [
+    {
+      sourceListingId: purchase.source_listing_id,
+      listingUrl: purchase.listing_url,
+      canonicalUrl: purchase.canonical_url,
+      title: purchase.title,
+      description: purchase.description || '',
+      priceAmount: nullableNumber(purchase.price_amount),
+      domesticShippingAmount: nullableNumber(purchase.domestic_shipping_amount),
+      importedAt: purchase.created_at,
+    },
+  ]
+}
+
+function sameListing(a: GroupedListingEntry, b: GroupedListingEntry) {
+  if (a.sourceListingId && b.sourceListingId && a.sourceListingId === b.sourceListingId) return true
+  const aUrl = normalizeUrlForCompare(a.canonicalUrl || a.listingUrl)
+  const bUrl = normalizeUrlForCompare(b.canonicalUrl || b.listingUrl)
+  return Boolean(aUrl && bUrl && aUrl === bUrl)
+}
+
+function sumNullable(values: Array<number | null>) {
+  const present = values.filter((value): value is number => value !== null)
+  return present.length ? present.reduce((sum, value) => sum + value, 0) : null
+}
+
+function combinedTitle(entries: GroupedListingEntry[]) {
+  return entries.map((entry) => entry.title.trim()).filter(Boolean).join(' && ')
+}
+
+function combinedDescription(entries: GroupedListingEntry[]) {
+  return entries
+    .map((entry) => {
+      const link = entry.canonicalUrl || entry.listingUrl
+      return [entry.title.trim(), entry.description.trim(), link ? `Originalangebot: ${link}` : '']
+        .filter(Boolean)
+        .join('\n')
+    })
+    .join('\n\n&&\n\n')
+}
+
 export async function POST(request: Request) {
   if (!hasTrustedRequestOrigin(request)) {
     return NextResponse.json({ error: 'Anfrage von fremder Origin blockiert.' }, { status: 403 })
   }
-
   const auth = await getApiUser()
   if (!auth.user) return NextResponse.json({ error: auth.error }, { status: auth.status })
 
@@ -39,7 +149,9 @@ export async function POST(request: Request) {
   const warnings: string[] = []
   const storedPaths: string[] = []
   const stagedPaths: string[] = []
+  const insertedImageIds: string[] = []
   let purchaseId: string | null = null
+  let createdPurchase = false
 
   try {
     const input = createPurchaseSchema.parse(await request.json())
@@ -49,6 +161,17 @@ export async function POST(request: Request) {
         ? normalizeListingUrl(input.canonicalUrl)
         : input.canonicalUrl ?? null
 
+    const incomingEntry: GroupedListingEntry = {
+      sourceListingId: input.externalId || null,
+      listingUrl,
+      canonicalUrl,
+      title: input.title,
+      description: input.description || '',
+      priceAmount: input.priceAmount,
+      domesticShippingAmount: input.domesticShippingAmount,
+      importedAt: new Date().toISOString(),
+    }
+
     const stagedPrefix = `${user.id}/staging/`
     for (const image of input.stagedImages) {
       if (!image.path.startsWith(stagedPrefix) || image.path.includes('..')) {
@@ -57,12 +180,57 @@ export async function POST(request: Request) {
       stagedPaths.push(image.path)
     }
 
+    let mergeTarget: MergeCandidate | null = null
+    const normalizedSeller = normalizeSeller(input.sellerName)
+    if (normalizedSeller && input.purchasedAt) {
+      const { data: candidates, error: candidateError } = await admin
+        .from('purchases')
+        .select(
+          'id, source_listing_id, listing_url, canonical_url, title, description, seller_name, price_amount, domestic_shipping_amount, price_currency, purchased_at, status, raw_metadata, created_at, purchase_images(id, sha256, position)',
+        )
+        .eq('user_id', user.id)
+        .eq('purchased_at', input.purchasedAt)
+        .eq('price_currency', input.priceCurrency)
+        .order('created_at', { ascending: true })
+        .limit(50)
+
+      if (candidateError) throw new Error(`Bestehende Einkäufe konnten nicht geprüft werden: ${candidateError.message}`)
+
+      const matching = ((candidates ?? []) as unknown as MergeCandidate[]).filter(
+        (candidate) => normalizeSeller(candidate.seller_name) === normalizedSeller,
+      )
+
+      for (const candidate of matching) {
+        if (groupedListingsFromPurchase(candidate).some((entry) => sameListing(entry, incomingEntry))) {
+          if (stagedPaths.length) await removeStoragePaths(stagedPaths)
+          return NextResponse.json(
+            {
+              id: candidate.id,
+              error: 'Dieses Bunjang-Angebot ist bereits Bestandteil des gespeicherten Einkaufs.',
+            },
+            { status: 409 },
+          )
+        }
+      }
+
+      if (matching.length) {
+        mergeTarget = matching[0]
+        if (matching.length > 1) {
+          warnings.push(
+            'Mehrere ältere Einkäufe mit gleichem Verkäufer und Kaufdatum existieren bereits. Der neue Import wurde aus Sicherheitsgründen nur mit dem ältesten passenden Datensatz zusammengeführt.',
+          )
+        }
+      }
+    }
+
+    const existingImages = mergeTarget?.purchase_images ?? []
+    const knownHashes = new Set(existingImages.map((image) => image.sha256).filter((hash): hash is string => Boolean(hash)))
+    let recognizedValidImage = false
+
     const remoteResults = await Promise.allSettled(
       input.remoteImageUrls.map((remoteUrl) => downloadListingImage(remoteUrl)),
     )
     const remoteAssets: RemoteImageAsset[] = []
-    const knownHashes = new Set<string>()
-
     for (const result of remoteResults) {
       if (result.status === 'rejected') {
         warnings.push(
@@ -73,11 +241,11 @@ export async function POST(request: Request) {
         continue
       }
 
+      recognizedValidImage = true
       if (knownHashes.has(result.value.sha256)) {
-        warnings.push('Ein doppelt erkanntes Angebotsbild wurde nur einmal archiviert.')
+        warnings.push('Ein bereits archiviertes oder doppelt erkanntes Angebotsbild wurde nur einmal gespeichert.')
         continue
       }
-
       knownHashes.add(result.value.sha256)
       remoteAssets.push(result.value)
     }
@@ -87,18 +255,17 @@ export async function POST(request: Request) {
       try {
         const { data, error } = await admin.storage.from(BUCKET).download(staged.path)
         if (error || !data) throw new Error(error?.message || 'Temporäre Datei nicht gefunden.')
-
         const bytes = Buffer.from(await data.arrayBuffer())
         const inspected = inspectImageBytes(bytes)
         if (inspected.mimeType !== staged.mimeType) {
           throw new Error('Dateityp und tatsächlicher Bildinhalt stimmen nicht überein.')
         }
+        recognizedValidImage = true
         if (knownHashes.has(inspected.sha256)) {
-          warnings.push(`${staged.originalName}: doppeltes Bild wurde nur einmal archiviert.`)
+          warnings.push(`${staged.originalName}: bereits archiviertes oder doppeltes Bild wurde nur einmal gespeichert.`)
           await admin.storage.from(BUCKET).remove([staged.path])
           continue
         }
-
         knownHashes.add(inspected.sha256)
         manualAssets.push({
           ...inspected,
@@ -115,7 +282,7 @@ export async function POST(request: Request) {
       }
     }
 
-    if (!remoteAssets.length && !manualAssets.length) {
+    if (!recognizedValidImage) {
       return NextResponse.json(
         {
           error:
@@ -126,68 +293,74 @@ export async function POST(request: Request) {
       )
     }
 
-    const { data: purchase, error: purchaseError } = await admin
-      .from('purchases')
-      .insert({
-        user_id: user.id,
-        source: input.source,
-        source_listing_id: input.externalId || null,
-        listing_url: listingUrl,
-        canonical_url: canonicalUrl,
-        title: input.title,
-        description: input.description || null,
-        seller_name: input.sellerName || null,
-        price_amount: input.priceAmount,
-        domestic_shipping_amount: input.domesticShippingAmount,
-        price_currency: input.priceCurrency,
-        purchased_at: input.purchasedAt || null,
-        status: input.status,
-        raw_metadata: {
-          imported_at: new Date().toISOString(),
-          requested_remote_image_count: input.remoteImageUrls.length,
-          requested_manual_image_count: input.stagedImages.length,
-          validated_remote_image_count: remoteAssets.length,
-          validated_manual_image_count: manualAssets.length,
-        },
-      })
-      .select('id')
-      .single()
+    if (mergeTarget) {
+      purchaseId = mergeTarget.id
+    } else {
+      const { data: purchase, error: purchaseError } = await admin
+        .from('purchases')
+        .insert({
+          user_id: user.id,
+          source: input.source,
+          source_listing_id: input.externalId || null,
+          listing_url: listingUrl,
+          canonical_url: canonicalUrl,
+          title: input.title,
+          description: input.description || null,
+          seller_name: input.sellerName || null,
+          price_amount: input.priceAmount,
+          domestic_shipping_amount: input.domesticShippingAmount,
+          price_currency: input.priceCurrency,
+          purchased_at: input.purchasedAt || null,
+          status: input.status,
+          raw_metadata: {
+            imported_at: new Date().toISOString(),
+            requested_remote_image_count: input.remoteImageUrls.length,
+            requested_manual_image_count: input.stagedImages.length,
+            validated_remote_image_count: remoteAssets.length,
+            validated_manual_image_count: manualAssets.length,
+            grouped_purchase: false,
+            grouped_listing_count: 1,
+            grouped_listings: [incomingEntry],
+          },
+        })
+        .select('id')
+        .single()
 
-    if (purchaseError || !purchase) {
-      await removeStoragePaths(manualAssets.map((asset) => asset.path))
-      const conflict = purchaseError?.code === '23505'
-      return NextResponse.json(
-        {
-          error: conflict
-            ? 'Dieses Bunjang-Angebot wurde bereits als Einkauf erfasst.'
-            : purchaseError?.message || 'Der Einkauf konnte nicht angelegt werden.',
-        },
-        { status: conflict ? 409 : 500 },
-      )
+      if (purchaseError || !purchase) {
+        await removeStoragePaths(manualAssets.map((asset) => asset.path))
+        const conflict = purchaseError?.code === '23505'
+        return NextResponse.json(
+          {
+            error: conflict
+              ? 'Dieses Bunjang-Angebot wurde bereits als Einkauf erfasst.'
+              : purchaseError?.message || 'Der Einkauf konnte nicht angelegt werden.',
+          },
+          { status: conflict ? 409 : 500 },
+        )
+      }
+      purchaseId = purchase.id
+      createdPurchase = true
     }
 
-    purchaseId = purchase.id
     const imageRows: Array<Record<string, unknown>> = []
-    let position = 0
+    let position = existingImages.reduce((max, image) => Math.max(max, image.position || 0), 0)
 
     for (const asset of remoteAssets) {
       position += 1
-      const path = `${user.id}/purchases/${purchase.id}/${String(position).padStart(2, '0')}-${asset.sha256.slice(0, 20)}.${asset.extension}`
+      const path = `${user.id}/purchases/${purchaseId}/${String(position).padStart(2, '0')}-${asset.sha256.slice(0, 20)}.${asset.extension}`
       const { error: uploadError } = await admin.storage.from(BUCKET).upload(path, asset.bytes, {
         contentType: asset.mimeType,
         cacheControl: '31536000',
         upsert: false,
       })
-
       if (uploadError) {
         warnings.push(`Ein Angebotsbild konnte nicht archiviert werden: ${uploadError.message}`)
         continue
       }
-
       storedPaths.push(path)
       imageRows.push({
         user_id: user.id,
-        purchase_id: purchase.id,
+        purchase_id: purchaseId,
         storage_path: path,
         source_url: asset.originalUrl,
         original_filename: null,
@@ -202,13 +375,12 @@ export async function POST(request: Request) {
 
     for (const asset of manualAssets) {
       position += 1
-      const targetPath = `${user.id}/purchases/${purchase.id}/${String(position).padStart(2, '0')}-manual-${randomUUID()}.${asset.extension}`
+      const targetPath = `${user.id}/purchases/${purchaseId}/${String(position).padStart(2, '0')}-manual-${randomUUID()}.${asset.extension}`
       const { error: uploadError } = await admin.storage.from(BUCKET).upload(targetPath, asset.bytes, {
         contentType: asset.mimeType,
         cacheControl: '31536000',
         upsert: false,
       })
-
       if (uploadError) {
         warnings.push(`Eine manuell hochgeladene Bilddatei wurde übersprungen: ${uploadError.message}`)
         await admin.storage.from(BUCKET).remove([asset.path])
@@ -217,13 +389,10 @@ export async function POST(request: Request) {
 
       storedPaths.push(targetPath)
       const { error: stagingDeleteError } = await admin.storage.from(BUCKET).remove([asset.path])
-      if (stagingDeleteError) {
-        warnings.push('Eine temporäre Kopie konnte nicht sofort bereinigt werden.')
-      }
-
+      if (stagingDeleteError) warnings.push('Eine temporäre Kopie konnte nicht sofort bereinigt werden.')
       imageRows.push({
         user_id: user.id,
-        purchase_id: purchase.id,
+        purchase_id: purchaseId,
         storage_path: targetPath,
         source_url: null,
         original_filename: asset.originalName,
@@ -236,8 +405,8 @@ export async function POST(request: Request) {
       })
     }
 
-    if (!imageRows.length) {
-      await admin.from('purchases').delete().eq('id', purchase.id)
+    if (!imageRows.length && createdPurchase) {
+      await admin.from('purchases').delete().eq('id', purchaseId)
       return NextResponse.json(
         {
           error:
@@ -248,14 +417,46 @@ export async function POST(request: Request) {
       )
     }
 
-    const { error: imageInsertError } = await admin.from('purchase_images').insert(imageRows)
-    if (imageInsertError) throw new Error(`Bildmetadaten konnten nicht gespeichert werden: ${imageInsertError.message}`)
+    if (imageRows.length) {
+      const { data: insertedImages, error: imageInsertError } = await admin
+        .from('purchase_images')
+        .insert(imageRows)
+        .select('id')
+      if (imageInsertError) throw new Error(`Bildmetadaten konnten nicht gespeichert werden: ${imageInsertError.message}`)
+      insertedImageIds.push(...(insertedImages ?? []).map((image) => image.id))
+    }
 
-    return NextResponse.json({ id: purchase.id, warnings }, { status: 201 })
+    if (mergeTarget) {
+      const entries = [...groupedListingsFromPurchase(mergeTarget), incomingEntry]
+      const oldMetadata = isRecord(mergeTarget.raw_metadata) ? mergeTarget.raw_metadata : {}
+      const { error: mergeError } = await admin
+        .from('purchases')
+        .update({
+          title: combinedTitle(entries),
+          description: combinedDescription(entries),
+          price_amount: sumNullable(entries.map((entry) => entry.priceAmount)),
+          domestic_shipping_amount: sumNullable(entries.map((entry) => entry.domesticShippingAmount)),
+          raw_metadata: {
+            ...oldMetadata,
+            grouped_purchase: true,
+            grouped_listing_count: entries.length,
+            grouped_listings: entries,
+            last_merged_at: new Date().toISOString(),
+          },
+        })
+        .eq('id', mergeTarget.id)
+        .eq('user_id', user.id)
+      if (mergeError) throw new Error(`Der Einkauf konnte nicht zusammengeführt werden: ${mergeError.message}`)
+    }
+
+    return NextResponse.json({ id: purchaseId, merged: Boolean(mergeTarget), warnings }, { status: createdPurchase ? 201 : 200 })
   } catch (error) {
+    if (insertedImageIds.length && !createdPurchase) {
+      await admin.from('purchase_images').delete().in('id', insertedImageIds)
+    }
     if (storedPaths.length) await removeStoragePaths(storedPaths)
     if (stagedPaths.length) await removeStoragePaths(stagedPaths)
-    if (purchaseId) await admin.from('purchases').delete().eq('id', purchaseId)
+    if (purchaseId && createdPurchase) await admin.from('purchases').delete().eq('id', purchaseId)
 
     const message = error instanceof Error ? error.message : 'Der Einkauf konnte nicht gespeichert werden.'
     return NextResponse.json({ error: message, warnings }, { status: 400 })

@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "CardCargo Bunjang Order Extractor",
+  "version": "3.2.0",
+  "description": "Smart-Sync mit Kaufkarten-Erkennung, Pause und kontrolliertem Abbruch.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "clipboardWrite",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://order.bunjang.co.kr/*"
+  ],
+  "action": {
+    "default_title": "Bunjang-Bestellungen für CardCargo synchronisieren",
+    "default_popup": "popup.html"
+  }
+}

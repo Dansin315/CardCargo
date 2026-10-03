@@ -51,6 +51,9 @@ export default async function WarehousePackagesPage({
           <h1>OLAEET-Pakete</h1>
           <p>Wareneingänge, Maße, Status und zugeordnete Bunjang-Einkäufe.</p>
         </div>
+        <Link className="button button-secondary" href="/warehouse-packages/import">
+          OLAEET importieren
+        </Link>
         <Link className="button button-primary" href="/warehouse-packages/new">
           + Paket erfassen
         </Link>

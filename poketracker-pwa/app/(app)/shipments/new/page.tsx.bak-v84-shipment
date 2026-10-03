@@ -1,0 +1,71 @@
+import Link from 'next/link'
+import type { Metadata } from 'next'
+import { ShipmentForm } from '@/components/shipment-form'
+import { requireUser } from '@/lib/auth'
+import { loadShipmentLinkedImages } from '@/lib/shipment-image-queries'
+import {
+  filterAssignableWarehousePackages,
+  type ShipmentPackageLink,
+  type ShipmentWarehousePackageChoice,
+} from '@/lib/shipments'
+
+export const metadata: Metadata = { title: 'Internationale Sendung erfassen' }
+export const dynamic = 'force-dynamic'
+
+export default async function NewShipmentPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ package?: string }>
+}) {
+  const query = await searchParams
+  const { supabase, user } = await requireUser()
+  const [packagesResult, linksResult] = await Promise.all([
+    supabase
+      .from('warehouse_packages')
+      .select(
+        'id, external_package_id, domestic_tracking_number, sender_name, status, arrived_at, weight_grams',
+      )
+      .order('created_at', { ascending: false }),
+    supabase.from('shipment_packages').select('shipment_id, warehouse_package_id'),
+  ])
+
+  if (packagesResult.error) throw new Error(packagesResult.error.message)
+  if (linksResult.error) throw new Error(linksResult.error.message)
+
+  const packages = filterAssignableWarehousePackages(
+    (packagesResult.data ?? []) as unknown as ShipmentWarehousePackageChoice[],
+    (linksResult.data ?? []) as unknown as ShipmentPackageLink[],
+  )
+  const linkedImages = await loadShipmentLinkedImages(supabase, packages)
+  const selectedWarehousePackageIds = packages.some(
+    (warehousePackage) => warehousePackage.id === query.package,
+  )
+    ? [query.package as string]
+    : []
+
+  return (
+    <div className="page-stack">
+      <div className="breadcrumb-row">
+        <Link href="/shipments">← Internationale Sendungen</Link>
+        <span>Manuelle Erfassung</span>
+      </div>
+      <header className="page-header compact">
+        <div>
+          <span className="eyebrow">OLAEET → Deutschland</span>
+          <h1>Internationale Sendung erfassen</h1>
+          <p>
+            OLAEET-Pakete konsolidieren, Versanddienst auswählen, Bilder und Kosten
+            dokumentieren.
+          </p>
+        </div>
+      </header>
+      <ShipmentForm
+        mode="create"
+        userId={user.id}
+        packages={packages}
+        linkedImages={linkedImages}
+        selectedWarehousePackageIds={selectedWarehousePackageIds}
+      />
+    </div>
+  )
+}

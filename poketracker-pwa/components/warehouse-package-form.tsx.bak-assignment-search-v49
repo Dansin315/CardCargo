@@ -1,0 +1,797 @@
+'use client'
+
+import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FormEvent,
+} from 'react'
+import { createClient } from '@/lib/supabase/client'
+import styles from './warehouse-package-assignment.module.css'
+import type { StagedImageInput } from '@/lib/types'
+import {
+  addDaysToDate,
+  isValidDateOnly,
+  packageStatusLabels,
+  packageStatuses,
+  toDateInput,
+  type PackagePurchaseChoice,
+  type PackagePurchaseImageChoice,
+  type WarehousePackageManualImageChoice,
+  type WarehousePackageRow,
+} from '@/lib/warehouse-packages'
+
+const MAX_MANUAL_IMAGES = 12
+const MAX_FILE_BYTES = 6 * 1024 * 1024
+const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
+
+const fileExtensions: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+}
+
+interface LocalImage {
+  id: string
+  file: File
+  previewUrl: string
+}
+
+type Props = {
+  mode: 'create' | 'edit'
+  userId: string
+  packageData?: WarehousePackageRow
+  purchases: PackagePurchaseChoice[]
+  purchaseImages: PackagePurchaseImageChoice[]
+  manualImages?: WarehousePackageManualImageChoice[]
+  selectedPurchaseIds?: string[]
+}
+
+function numberOrNull(value: FormDataEntryValue | null) {
+  const normalized = String(value ?? '').trim().replace(',', '.')
+  if (!normalized) return null
+  const parsed = Number(normalized)
+  return Number.isFinite(parsed) ? parsed : Number.NaN
+}
+
+function textOrNull(value: FormDataEntryValue | null) {
+  const normalized = String(value ?? '').trim()
+  return normalized || null
+}
+
+function dateOrNull(value: FormDataEntryValue | null) {
+  const normalized = String(value ?? '').trim()
+  if (!normalized) return null
+  return isValidDateOnly(normalized) ? normalized : 'invalid'
+}
+
+function fileExtension(mimeType: string) {
+  return fileExtensions[mimeType] ?? 'bin'
+}
+
+function readableFileSize(bytes: number) {
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+function dateTimestamp(value: string | null | undefined) {
+  if (!value || !isValidDateOnly(value)) return null
+  const timestamp = Date.parse(`${value}T00:00:00Z`)
+  return Number.isNaN(timestamp) ? null : timestamp
+}
+
+function subtractDaysFromDate(value: string | null | undefined, days: number) {
+  const timestamp = dateTimestamp(value)
+  if (timestamp === null || !Number.isInteger(days)) return ''
+  const date = new Date(timestamp)
+  date.setUTCDate(date.getUTCDate() - days)
+  return date.toISOString().slice(0, 10)
+}
+
+function purchaseDistanceDays(purchasedAt: string | null, arrivedAt: string) {
+  const purchaseTime = dateTimestamp(purchasedAt)
+  const arrivalTime = dateTimestamp(arrivedAt)
+  if (purchaseTime === null || arrivalTime === null) return Number.POSITIVE_INFINITY
+  return Math.abs(arrivalTime - purchaseTime) / 86_400_000
+}
+
+function isLikelyPurchaseDate(purchasedAt: string | null, arrivedAt: string) {
+  const purchaseTime = dateTimestamp(purchasedAt)
+  const arrivalTime = dateTimestamp(arrivedAt)
+  if (purchaseTime === null || arrivalTime === null) return false
+  const diffDays = (arrivalTime - purchaseTime) / 86_400_000
+  return diffDays >= 0 && diffDays <= 45
+}
+
+function formatPurchasePrice(amount: number | null, currency: string) {
+  if (amount === null || amount === undefined || !Number.isFinite(Number(amount))) return null
+  return `${new Intl.NumberFormat('de-DE', { maximumFractionDigits: 0 }).format(Number(amount))} ${currency || 'KRW'}`
+}
+
+export function WarehousePackageForm({
+  mode,
+  userId,
+  packageData,
+  purchases,
+  purchaseImages,
+  manualImages = [],
+  selectedPurchaseIds = [],
+}: Props) {
+  const router = useRouter()
+  const [submitting, setSubmitting] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+  const [arrivedAt, setArrivedAt] = useState(toDateInput(packageData?.arrived_at))
+  const [selectedPurchases, setSelectedPurchases] = useState<string[]>(selectedPurchaseIds)
+  const [removedManualImageIds, setRemovedManualImageIds] = useState<string[]>([])
+  const [localImages, setLocalImages] = useState<LocalImage[]>([])
+  const [purchaseSearch, setPurchaseSearch] = useState('')
+  const initialArrivalDate = toDateInput(packageData?.arrived_at)
+  const [purchaseDateFrom, setPurchaseDateFrom] = useState(
+    subtractDaysFromDate(initialArrivalDate, 45),
+  )
+  const [purchaseDateTo, setPurchaseDateTo] = useState(initialArrivalDate)
+  const [purchaseDateFilterTouched, setPurchaseDateFilterTouched] = useState(false)
+  const [purchaseSort, setPurchaseSort] = useState<
+    'closest' | 'date_desc' | 'date_asc' | 'price_desc' | 'price_asc' | 'title'
+  >('closest')
+  const localImagesRef = useRef<LocalImage[]>([])
+  const storageDeadlineAt = addDaysToDate(arrivedAt, 80)
+
+  useEffect(() => {
+    localImagesRef.current = localImages
+  }, [localImages])
+
+  useEffect(() => {
+    return () => {
+      localImagesRef.current.forEach((image) => URL.revokeObjectURL(image.previewUrl))
+    }
+  }, [])
+
+  function togglePurchase(purchaseId: string) {
+    setSelectedPurchases((current) =>
+      current.includes(purchaseId)
+        ? current.filter((id) => id !== purchaseId)
+        : [...current, purchaseId],
+    )
+  }
+
+  function handleArrivedAtChange(value: string) {
+    setArrivedAt(value)
+    if (!purchaseDateFilterTouched) {
+      setPurchaseDateFrom(subtractDaysFromDate(value, 45))
+      setPurchaseDateTo(value)
+    }
+  }
+
+  function applyLikelyDateWindow() {
+    if (!arrivedAt) return
+    setPurchaseDateFrom(subtractDaysFromDate(arrivedAt, 45))
+    setPurchaseDateTo(arrivedAt)
+    setPurchaseDateFilterTouched(false)
+  }
+
+  function clearPurchaseDateFilter() {
+    setPurchaseDateFrom('')
+    setPurchaseDateTo('')
+    setPurchaseDateFilterTouched(true)
+  }
+
+  function toggleExistingManualImage(imageId: string) {
+    setRemovedManualImageIds((current) =>
+      current.includes(imageId)
+        ? current.filter((id) => id !== imageId)
+        : [...current, imageId],
+    )
+  }
+
+  function addLocalImages(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? [])
+    if (!files.length) return
+
+    const remainingExisting = manualImages.filter(
+      (image) => !removedManualImageIds.includes(image.id),
+    ).length
+    const remaining = Math.max(0, MAX_MANUAL_IMAGES - remainingExisting - localImages.length)
+    const valid: LocalImage[] = []
+    const errors: string[] = []
+
+    for (const file of files.slice(0, remaining)) {
+      if (!ALLOWED_MIME_TYPES.has(file.type)) {
+        errors.push(`${file.name}: Dateityp nicht unterstützt`)
+        continue
+      }
+      if (file.size > MAX_FILE_BYTES) {
+        errors.push(`${file.name}: größer als 6 MB`)
+        continue
+      }
+      valid.push({
+        id: crypto.randomUUID(),
+        file,
+        previewUrl: URL.createObjectURL(file),
+      })
+    }
+
+    if (files.length > remaining) {
+      errors.push(`Maximal ${MAX_MANUAL_IMAGES} manuelle Paketbilder`)
+    }
+    setLocalImages((current) => [...current, ...valid])
+    setMessage(errors.length ? errors.join(' · ') : null)
+    event.target.value = ''
+  }
+
+  function removeLocalImage(id: string) {
+    setLocalImages((current) => {
+      const target = current.find((image) => image.id === id)
+      if (target) URL.revokeObjectURL(target.previewUrl)
+      return current.filter((image) => image.id !== id)
+    })
+  }
+
+  async function stageLocalImages(): Promise<StagedImageInput[]> {
+    if (!localImages.length) return []
+    const supabase = createClient()
+    const uploadId = crypto.randomUUID()
+    const uploaded: StagedImageInput[] = []
+
+    try {
+      for (const [index, image] of localImages.entries()) {
+        const extension = fileExtension(image.file.type)
+        const path = `${userId}/staging/warehouse-packages/${uploadId}/${String(index + 1).padStart(2, '0')}-${crypto.randomUUID()}.${extension}`
+        const { error } = await supabase.storage.from('listing-images').upload(path, image.file, {
+          contentType: image.file.type,
+          cacheControl: '3600',
+          upsert: false,
+        })
+        if (error) throw new Error(`${image.file.name}: ${error.message}`)
+        uploaded.push({
+          path,
+          originalName: image.file.name,
+          mimeType: image.file.type,
+          byteSize: image.file.size,
+        })
+      }
+      return uploaded
+    } catch (error) {
+      if (uploaded.length) {
+        await supabase.storage.from('listing-images').remove(uploaded.map((image) => image.path))
+      }
+      throw error
+    }
+  }
+
+  async function cleanupStagedImages(images: StagedImageInput[]) {
+    if (!images.length) return
+    const supabase = createClient()
+    await supabase.storage.from('listing-images').remove(images.map((image) => image.path))
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setSubmitting(true)
+    setMessage(null)
+    let stagedImages: StagedImageInput[] = []
+
+    try {
+      const form = new FormData(event.currentTarget)
+      const numericValues = {
+        weightGrams: numberOrNull(form.get('weightGrams')),
+        lengthCm: numberOrNull(form.get('lengthCm')),
+        widthCm: numberOrNull(form.get('widthCm')),
+        heightCm: numberOrNull(form.get('heightCm')),
+      }
+      if (Object.values(numericValues).some(Number.isNaN)) {
+        throw new Error('Gewicht und Maße müssen gültige Zahlen enthalten.')
+      }
+
+      const dateValues = {
+        arrivedAt: dateOrNull(form.get('arrivedAt')),
+        inspectedAt: dateOrNull(form.get('inspectedAt')),
+        storageStartedAt: dateOrNull(form.get('storageStartedAt')),
+      }
+      if (Object.values(dateValues).includes('invalid')) {
+        throw new Error('Mindestens ein Datum ist ungültig.')
+      }
+
+      stagedImages = await stageLocalImages()
+      const endpoint =
+        mode === 'create'
+          ? '/api/warehouse-packages'
+          : `/api/warehouse-packages/${packageData?.id}`
+      const response = await fetch(endpoint, {
+        method: mode === 'create' ? 'POST' : 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          externalPackageId: textOrNull(form.get('externalPackageId')),
+          customerCode: textOrNull(form.get('customerCode')),
+          domesticTrackingNumber: textOrNull(form.get('domesticTrackingNumber')),
+          domesticCarrier: textOrNull(form.get('domesticCarrier')),
+          senderName: textOrNull(form.get('senderName')),
+          packageDescription: textOrNull(form.get('packageDescription')),
+          providerStatus: textOrNull(form.get('providerStatus')),
+          status: String(form.get('status') ?? 'expected'),
+          ...numericValues,
+          ...dateValues,
+          notes: textOrNull(form.get('notes')),
+          purchaseIds: selectedPurchases,
+          stagedImages,
+          removeManualImageIds: removedManualImageIds,
+        }),
+      })
+
+      const result = (await response.json()) as { id?: string; error?: string }
+      if (!response.ok || !result.id) {
+        await cleanupStagedImages(stagedImages)
+        throw new Error(result.error || 'Das OLAEET-Paket konnte nicht gespeichert werden.')
+      }
+
+      router.push(
+        `/warehouse-packages/${result.id}?${mode === 'create' ? 'created' : 'updated'}=1`,
+      )
+      router.refresh()
+    } catch (error) {
+      if (stagedImages.length) await cleanupStagedImages(stagedImages)
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : 'Das OLAEET-Paket konnte nicht gespeichert werden.',
+      )
+      setSubmitting(false)
+    }
+  }
+
+  const cancelHref = packageData ? `/warehouse-packages/${packageData.id}` : '/warehouse-packages'
+  const visibleManualImages = manualImages.filter(
+    (image) => !removedManualImageIds.includes(image.id),
+  )
+  const packagePreviewImage = visibleManualImages.find((image) => image.signed_url)
+  const purchaseImageByPurchaseId = useMemo(() => {
+    const result = new Map<string, PackagePurchaseImageChoice>()
+    for (const image of purchaseImages) {
+      const existing = result.get(image.purchase_id)
+      if (!existing || image.position < existing.position) result.set(image.purchase_id, image)
+    }
+    return result
+  }, [purchaseImages])
+  const filteredPurchases = useMemo(() => {
+    const normalizedSearch = purchaseSearch.trim().toLocaleLowerCase()
+    const filtered = purchases.filter((purchase) => {
+      const alreadySelected = selectedPurchases.includes(purchase.id)
+      if (alreadySelected) return true
+      const haystack = [
+        purchase.title,
+        purchase.source_listing_id,
+        purchase.seller_name,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLocaleLowerCase()
+      if (normalizedSearch && !haystack.includes(normalizedSearch)) return false
+      if (purchaseDateFrom && (!purchase.purchased_at || purchase.purchased_at < purchaseDateFrom)) {
+        return false
+      }
+      if (purchaseDateTo && (!purchase.purchased_at || purchase.purchased_at > purchaseDateTo)) {
+        return false
+      }
+      return true
+    })
+
+    return [...filtered].sort((a, b) => {
+      const selectionOrder = Number(selectedPurchases.includes(b.id)) - Number(selectedPurchases.includes(a.id))
+      if (selectionOrder !== 0) return selectionOrder
+      if (purchaseSort === 'closest') {
+        const distance = purchaseDistanceDays(a.purchased_at, arrivedAt) - purchaseDistanceDays(b.purchased_at, arrivedAt)
+        if (Number.isFinite(distance) && distance !== 0) return distance
+      }
+      if (purchaseSort === 'date_asc') return (a.purchased_at || '9999-12-31').localeCompare(b.purchased_at || '9999-12-31')
+      if (purchaseSort === 'price_desc') return Number(b.price_amount ?? -1) - Number(a.price_amount ?? -1)
+      if (purchaseSort === 'price_asc') return Number(a.price_amount ?? Number.MAX_SAFE_INTEGER) - Number(b.price_amount ?? Number.MAX_SAFE_INTEGER)
+      if (purchaseSort === 'title') return a.title.localeCompare(b.title, 'de')
+      return (b.purchased_at || '').localeCompare(a.purchased_at || '')
+    })
+  }, [arrivedAt, purchaseDateFrom, purchaseDateTo, purchaseSearch, purchaseSort, purchases, selectedPurchases])
+
+  return (
+    <form className="page-stack" onSubmit={submit}>
+      {message ? <div className="alert alert-error">{message}</div> : null}
+
+      <section className="panel">
+        <div className="panel-heading">
+          <div>
+            <h2>Paketidentifikation</h2>
+            <p>Mindestens Paket-ID oder koreanische Trackingnummer erfassen.</p>
+          </div>
+        </div>
+        <div className="form-grid two-columns">
+          <label>
+            OLAEET-Paket-ID
+            <input name="externalPackageId" type="text" maxLength={200} defaultValue={packageData?.external_package_id ?? ''} />
+          </label>
+          <label>
+            Kundencode / Suite-Code
+            <input name="customerCode" type="text" maxLength={100} defaultValue={packageData?.customer_code ?? ''} />
+          </label>
+          <label>
+            Koreanische Trackingnummer
+            <input name="domesticTrackingNumber" type="text" maxLength={200} defaultValue={packageData?.domestic_tracking_number ?? ''} />
+          </label>
+          <label>
+            Koreanischer Paketdienst
+            <input name="domesticCarrier" type="text" maxLength={120} placeholder="z. B. CJ Logistics" defaultValue={packageData?.domestic_carrier ?? ''} />
+          </label>
+          <label>
+            Händler / Absender
+            <input name="senderName" type="text" maxLength={200} defaultValue={packageData?.sender_name ?? ''} />
+          </label>
+          <label>
+            Status
+            <select name="status" defaultValue={packageData?.status ?? 'expected'}>
+              {packageStatuses.map((status) => (
+                <option key={status} value={status}>{packageStatusLabels[status]}</option>
+              ))}
+            </select>
+          </label>
+          <label className="field-wide">
+            Paketbeschreibung
+            <textarea name="packageDescription" rows={3} maxLength={2_000} defaultValue={packageData?.package_description ?? ''} />
+          </label>
+          <label className="field-wide">
+            OLAEET-Originalstatus
+            <input name="providerStatus" type="text" maxLength={200} placeholder="Originalbezeichnung aus OLAEET" defaultValue={packageData?.provider_status ?? ''} />
+          </label>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-heading">
+          <div>
+            <h2>Eingang, Inspektion und Lagerung</h2>
+            <p>Kalendertage sowie von OLAEET gemessene Paketdaten.</p>
+          </div>
+        </div>
+        <div className="form-grid two-columns">
+          <label>
+            Eingang bei OLAEET
+            <input name="arrivedAt" type="date" value={arrivedAt} onChange={(event) => handleArrivedAtChange(event.target.value)} />
+          </label>
+          <label>
+            Inspektionsdatum
+            <input name="inspectedAt" type="date" defaultValue={toDateInput(packageData?.inspected_at)} />
+          </label>
+          <label>
+            Lagerbeginn
+            <input name="storageStartedAt" type="date" defaultValue={toDateInput(packageData?.storage_started_at)} />
+          </label>
+          <label>
+            Lagerfrist
+            <input type="date" value={storageDeadlineAt} readOnly aria-describedby="storage-deadline-help" />
+            <small id="storage-deadline-help">Automatisch: 80 Kalendertage nach dem Eingang bei OLAEET.</small>
+          </label>
+          <label>
+            Gewicht in Gramm
+            <input name="weightGrams" type="number" min="0" max="1000000" step="0.01" inputMode="decimal" defaultValue={packageData?.weight_grams ?? ''} />
+          </label>
+          <div className="dimension-grid field-wide">
+            <label>
+              Länge (cm)
+              <input name="lengthCm" type="number" min="0" max="10000" step="0.01" inputMode="decimal" defaultValue={packageData?.length_cm ?? ''} />
+            </label>
+            <label>
+              Breite (cm)
+              <input name="widthCm" type="number" min="0" max="10000" step="0.01" inputMode="decimal" defaultValue={packageData?.width_cm ?? ''} />
+            </label>
+            <label>
+              Höhe (cm)
+              <input name="heightCm" type="number" min="0" max="10000" step="0.01" inputMode="decimal" defaultValue={packageData?.height_cm ?? ''} />
+            </label>
+          </div>
+          <label className="field-wide">
+            Notizen
+            <textarea name="notes" rows={5} maxLength={10_000} defaultValue={packageData?.notes ?? ''} />
+          </label>
+        </div>
+      </section>
+
+      <section className={`panel ${styles.assignmentPanel}`}>
+        <div className="panel-heading">
+          <div>
+            <h2>Einkäufe diesem OLAEET-Paket zuordnen</h2>
+            <p>Paketdaten und mögliche Bunjang-Einkäufe direkt nebeneinander vergleichen.</p>
+          </div>
+          <span className="panel-note">{selectedPurchases.length} ausgewählt · {purchases.length} zuweisbar</span>
+        </div>
+
+        <div className={styles.assignmentGrid}>
+          <aside className={styles.packageSummary}>
+            <div className={styles.packageSummaryHeader}>
+              <span className="section-label">Aktuelles OLAEET-Paket</span>
+              <strong>
+                {packageData?.external_package_id || packageData?.domestic_tracking_number || 'Neues OLAEET-Paket'}
+              </strong>
+              <small>{packageData?.sender_name || 'Absender noch nicht erfasst'}</small>
+            </div>
+
+            <div className={styles.packageImage}>
+              {packagePreviewImage?.signed_url ? (
+                <img
+                  src={packagePreviewImage.signed_url}
+                  alt={packagePreviewImage.original_filename || 'OLAEET-Paketbild'}
+                />
+              ) : (
+                <div className={styles.packageImagePlaceholder}>
+                  Noch kein Paketbild vorhanden. Ein OLAEET-/Inspektionsbild erleichtert die Zuordnung deutlich.
+                </div>
+              )}
+            </div>
+
+            <div className={styles.packageFacts}>
+              <div className={styles.factRow}>
+                <span>Eingang</span>
+                <strong>{arrivedAt || '–'}</strong>
+              </div>
+              <div className={styles.factRow}>
+                <span>Tracking</span>
+                <strong>{packageData?.domestic_tracking_number || '–'}</strong>
+              </div>
+              <div className={styles.factRow}>
+                <span>Paketdienst</span>
+                <strong>{packageData?.domestic_carrier || '–'}</strong>
+              </div>
+              <div className={styles.factRow}>
+                <span>Maße</span>
+                <strong>
+                  {packageData?.length_cm || packageData?.width_cm || packageData?.height_cm
+                    ? `${packageData?.length_cm ?? '?'} × ${packageData?.width_cm ?? '?'} × ${packageData?.height_cm ?? '?'} cm`
+                    : '–'}
+                </strong>
+              </div>
+              <div className={styles.factRow}>
+                <span>Status</span>
+                <strong>{packageData ? packageStatusLabels[packageData.status] : packageStatusLabels.expected}</strong>
+              </div>
+            </div>
+
+            <p className={styles.filterHint}>
+              Bereits anderen OLAEET-Paketen zugeordnete Einkäufe werden serverseitig ausgeblendet.
+            </p>
+          </aside>
+
+          <div className={styles.purchaseWorkspace}>
+            <div className={styles.filterBar}>
+              <label>
+                Einkauf suchen
+                <input
+                  type="search"
+                  value={purchaseSearch}
+                  onChange={(event) => setPurchaseSearch(event.target.value)}
+                  placeholder="Titel, Bunjang-ID, Verkäufer …"
+                />
+              </label>
+              <label>
+                Kaufdatum von
+                <input
+                  type="date"
+                  value={purchaseDateFrom}
+                  onChange={(event) => {
+                    setPurchaseDateFrom(event.target.value)
+                    setPurchaseDateFilterTouched(true)
+                  }}
+                />
+              </label>
+              <label>
+                Kaufdatum bis
+                <input
+                  type="date"
+                  value={purchaseDateTo}
+                  onChange={(event) => {
+                    setPurchaseDateTo(event.target.value)
+                    setPurchaseDateFilterTouched(true)
+                  }}
+                />
+              </label>
+              <label>
+                Sortierung
+                <select
+                  value={purchaseSort}
+                  onChange={(event) => setPurchaseSort(event.target.value as typeof purchaseSort)}
+                >
+                  <option value="closest">Nähe zum OLAEET-Eingang</option>
+                  <option value="date_desc">Kaufdatum: neu → alt</option>
+                  <option value="date_asc">Kaufdatum: alt → neu</option>
+                  <option value="price_desc">Preis: hoch → niedrig</option>
+                  <option value="price_asc">Preis: niedrig → hoch</option>
+                  <option value="title">Titel: A–Z</option>
+                </select>
+              </label>
+            </div>
+
+            <div className={styles.filterActions}>
+              <button
+                className="button button-secondary button-small"
+                type="button"
+                onClick={applyLikelyDateWindow}
+                disabled={!arrivedAt}
+              >
+                45 Tage vor Eingang
+              </button>
+              <button className="button button-ghost button-small" type="button" onClick={clearPurchaseDateFilter}>
+                Datumsfilter löschen
+              </button>
+              <span className={styles.filterHint}>{filteredPurchases.length} Treffer</span>
+            </div>
+
+            <div className={styles.selectionBar}>
+              <strong>
+                {selectedPurchases.length} Einkauf{selectedPurchases.length === 1 ? '' : 'e'} ausgewählt
+              </strong>
+              <div className={styles.selectionButtons}>
+                <button
+                  className="button button-secondary button-small"
+                  type="button"
+                  onClick={() =>
+                    setSelectedPurchases((current) =>
+                      Array.from(new Set([...current, ...filteredPurchases.map((purchase) => purchase.id)])),
+                    )
+                  }
+                  disabled={!filteredPurchases.length}
+                >
+                  Alle sichtbaren auswählen
+                </button>
+                <button
+                  className="button button-ghost button-small"
+                  type="button"
+                  onClick={() => setSelectedPurchases([])}
+                  disabled={!selectedPurchases.length}
+                >
+                  Auswahl leeren
+                </button>
+              </div>
+            </div>
+
+            {filteredPurchases.length ? (
+              <div className={styles.purchaseList}>
+                {filteredPurchases.map((purchase) => {
+                  const image = purchaseImageByPurchaseId.get(purchase.id)
+                  const selected = selectedPurchases.includes(purchase.id)
+                  const likely = isLikelyPurchaseDate(purchase.purchased_at, arrivedAt)
+                  const price = formatPurchasePrice(purchase.price_amount, purchase.currency)
+                  return (
+                    <label
+                      className={`${styles.purchaseCard} ${selected ? styles.purchaseCardSelected : ''}`}
+                      key={purchase.id}
+                    >
+                      <input
+                        name="purchaseIds"
+                        type="checkbox"
+                        value={purchase.id}
+                        checked={selected}
+                        onChange={() => togglePurchase(purchase.id)}
+                      />
+                      <div className={styles.purchaseThumb}>
+                        {image?.signed_url ? (
+                          <img src={image.signed_url} alt={`Angebotsbild von ${purchase.title}`} />
+                        ) : (
+                          <div className={styles.purchaseThumbPlaceholder}>Kein Bild</div>
+                        )}
+                      </div>
+                      <span className={styles.purchaseInfo}>
+                        <strong>{purchase.title}</strong>
+                        <span className={styles.purchaseMeta}>
+                          <span>{purchase.source_listing_id ? `Bunjang #${purchase.source_listing_id}` : 'Manuell'}</span>
+                          <span>{purchase.purchased_at || 'ohne Kaufdatum'}</span>
+                          {purchase.seller_name ? <span>Verkäufer: {purchase.seller_name}</span> : null}
+                          {price ? <span>{price}</span> : null}
+                        </span>
+                        <span className={styles.badges}>
+                          {likely ? (
+                            <span className={`${styles.badge} ${styles.badgeLikely}`}>Zeitlich plausibel</span>
+                          ) : null}
+                          {selected ? (
+                            <span className={`${styles.badge} ${styles.badgeSelected}`}>Ausgewählt</span>
+                          ) : null}
+                        </span>
+                      </span>
+                    </label>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className={styles.emptyFiltered}>
+                <strong>Keine passenden Einkäufe gefunden.</strong>
+                <p>
+                  Suche oder Datumsfilter anpassen. Bereits anderen Paketen zugeordnete Einkäufe sind hier nicht verfügbar.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+<section className="panel">
+        <div className="panel-heading">
+          <div>
+            <h2>Manuelle OLAEET-Paketbilder</h2>
+            <p>Zum Beispiel OLAEET-Fotos, Inspektionsbilder oder eigene Paketaufnahmen.</p>
+          </div>
+          <span className="panel-note">
+            {visibleManualImages.length + localImages.length}/{MAX_MANUAL_IMAGES}
+          </span>
+        </div>
+
+        {manualImages.length ? (
+          <div className="detail-gallery compact-gallery">
+            {manualImages.map((image) => {
+              const removed = removedManualImageIds.includes(image.id)
+              return (
+                <figure className={removed ? 'image-marked-for-removal' : undefined} key={image.id}>
+                  {image.signed_url ? (
+                    <img src={image.signed_url} alt={image.original_filename || 'Manuelles OLAEET-Paketbild'} />
+                  ) : (
+                    <div className="missing-image">Bild nicht verfügbar</div>
+                  )}
+                  <figcaption>
+                    <span>{image.original_filename || `Paketbild ${image.position}`}</span>
+                    <button
+                      className="button button-ghost button-small"
+                      type="button"
+                      onClick={() => toggleExistingManualImage(image.id)}
+                    >
+                      {removed ? 'Behalten' : 'Entfernen'}
+                    </button>
+                  </figcaption>
+                </figure>
+              )
+            })}
+          </div>
+        ) : null}
+
+        <div className="upload-zone">
+          <div>
+            <strong>Bilder hinzufügen</strong>
+            <span>JPEG, PNG, WebP oder GIF; maximal 6 MB je Datei.</span>
+          </div>
+          <label className="button button-secondary">
+            Dateien wählen
+            <input
+              className="visually-hidden"
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              multiple
+              onChange={addLocalImages}
+              disabled={visibleManualImages.length + localImages.length >= MAX_MANUAL_IMAGES}
+            />
+          </label>
+        </div>
+
+        {localImages.length ? (
+          <div className="local-image-list">
+            {localImages.map((image) => (
+              <article key={image.id}>
+                <img src={image.previewUrl} alt={image.file.name} />
+                <div>
+                  <strong>{image.file.name}</strong>
+                  <span>{readableFileSize(image.file.size)}</span>
+                </div>
+                <button className="button button-ghost button-small" type="button" onClick={() => removeLocalImage(image.id)}>
+                  Entfernen
+                </button>
+              </article>
+            ))}
+          </div>
+        ) : null}
+
+        <p className="muted-copy">
+          Diese Bilder gehören direkt zum OLAEET-Paket. Sie bleiben erhalten, wenn ein Bunjang-Einkauf aus dem Paket entfernt wird.
+        </p>
+      </section>
+
+      <div className="form-actions">
+        <Link className="button button-secondary" href={cancelHref}>Abbrechen</Link>
+        <button className="button button-primary" type="submit" disabled={submitting}>
+          {submitting ? 'Speichert …' : mode === 'create' ? 'OLAEET-Paket speichern' : 'Änderungen speichern'}
+        </button>
+      </div>
+    </form>
+  )
+}

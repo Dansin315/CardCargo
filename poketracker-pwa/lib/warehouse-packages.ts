@@ -61,6 +61,9 @@ export interface PackagePurchaseChoice {
   source_listing_id: string | null
   purchased_at: string | null
   status: string
+  seller_name: string | null
+  price_amount: number | null
+  currency: string
 }
 
 export interface WarehousePackagePurchaseLink {

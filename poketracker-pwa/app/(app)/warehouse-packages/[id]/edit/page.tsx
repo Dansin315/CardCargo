@@ -35,7 +35,7 @@ export default async function EditWarehousePackagePage({
       .single(),
     supabase
       .from('purchases')
-      .select('id, title, source_listing_id, purchased_at, status')
+      .select('id, title, source_listing_id, purchased_at, status, seller_name, price_amount, currency:price_currency')
       .order('created_at', { ascending: false }),
     supabase
       .from('warehouse_package_purchases')

@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>CardCargo Bunjang Sync</title>
+  <style>
+    body { font: 14px system-ui,sans-serif; width: 430px; padding: 16px; margin: 0; }
+    h1 { font-size: 18px; margin: 0 0 8px; }
+    p { line-height: 1.45; }
+    .actions { display: grid; gap: 9px; margin: 14px 0; }
+    .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+    .date-filter {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      padding: 12px;
+      border: 1px solid #ddd;
+      border-radius: 10px;
+      margin: 14px 0;
+    }
+    .date-filter label {
+      display: grid;
+      gap: 5px;
+      font-weight: 650;
+    }
+    .date-filter input {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 9px 8px;
+      font: inherit;
+    }
+    .date-filter .wide { grid-column: 1 / -1; }
+    button { width: 100%; padding: 11px 12px; cursor: pointer; font-weight: 650; }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    #status { min-height: 86px; padding: 10px 0; white-space: pre-line; line-height: 1.45; }
+    .summary { display: grid; grid-template-columns: 1fr auto; gap: 5px 12px; border-top: 1px solid #ddd; padding-top: 10px; }
+    .muted { opacity: .7; font-size: 12px; }
+    .slow-fallback {
+      display: flex;
+      gap: 9px;
+      align-items: flex-start;
+      padding: 10px 12px;
+      border: 1px solid #ddd;
+      border-radius: 10px;
+      margin: 12px 0;
+    }
+    .slow-fallback input { margin-top: 3px; }
+  </style>
+</head>
+<body>
+  <h1>CardCargo Bunjang Detail Sync</h1>
+  <p>
+    Wähle zuerst den Zeitraum. Standardmäßig werden nur die letzten 7 Tage
+    inklusive heute geprüft.
+  </p>
+
+  <div class="date-filter">
+    <label>
+      Von
+      <input id="dateFrom" type="date" />
+    </label>
+
+    <label>
+      Bis
+      <input id="dateTo" type="date" />
+    </label>
+
+    <button id="last7" class="wide" type="button">
+      Auf letzte 7 Tage zurücksetzen
+    </button>
+  </div>
+
+  <label class="slow-fallback">
+    <input id="slowFallback" type="checkbox" />
+    <span>
+      <strong>Langsamen Karten-Fallback verwenden</strong><br />
+      <small>
+        Nur einschalten, wenn die Netzwerk-Zusammenfassungen sichtbare
+        Bestellungen nicht vollständig erfassen. Standardmäßig aus.
+      </small>
+    </span>
+  </label>
+
+  <div class="actions">
+    <button id="smart" type="button">Smart Sync: neu + ohne Tracking</button>
+    <button id="full" type="button">Gesamte erkannte Historie im Zeitraum prüfen</button>
+
+    <div class="controls">
+      <button id="pause" type="button" disabled>Pausieren</button>
+      <button id="stop" type="button" disabled>Beenden</button>
+    </div>
+
+    <button id="exportPartial" type="button" disabled>
+      Bisherige Daten erneut kopieren
+    </button>
+
+    <button id="reset" type="button">
+      Lokalen Sync-/Capture-Stand zurücksetzen
+    </button>
+  </div>
+
+  <div id="status" role="status">Bereit.</div>
+  <div id="summary" class="summary" hidden></div>
+
+  <p class="muted">
+    Der schnelle Standardweg filtert Zeitraum und final stornierte/erstattete Orders bereits anhand der Bunjang-Übersichtsdaten,
+    bevor Detailseiten geöffnet werden. Der einzelne Kaufkarten-Klick ist nur
+    noch ein optionaler Fallback. Das gerenderte Detaildatum bleibt die finale Kontrolle.
+  </p>
+
+  <script src="popup.js"></script>
+</body>
+</html>

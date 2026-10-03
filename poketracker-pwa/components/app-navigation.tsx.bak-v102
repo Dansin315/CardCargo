@@ -1,0 +1,40 @@
+'use client'
+
+import { ArchivedImageDownloadEnhancer } from '@/components/archived-image-download-enhancer'
+import Link from 'next/link'
+import { usePathname } from 'next/navigation'
+
+const links = [
+  { href: '/', label: 'Übersicht', exact: true },
+  { href: '/purchases', label: 'Einkäufe' },
+  
+  { href: '/warehouse-packages', label: 'OLAEET-Pakete' },
+  { href: '/shipments', label: 'Sendungen' },
+  { href: '/inventory', label: 'Inventar' },
+]
+
+function isActive(pathname: string, href: string, exact?: boolean) {
+  if (exact) return pathname === href
+  if (href === '/') return pathname === '/'
+  return pathname === href || pathname.startsWith(`${href}/`)
+}
+
+export function AppNavigation() {
+  const pathname = usePathname()
+
+  return (
+    <nav className="main-nav" aria-label="Hauptnavigation">
+      <ArchivedImageDownloadEnhancer />
+      {links.map((link) => (
+        <Link
+          href={link.href}
+          key={link.href}
+          className={isActive(pathname, link.href, link.exact) ? 'is-active' : undefined}
+          aria-current={isActive(pathname, link.href, link.exact) ? 'page' : undefined}
+        >
+          {link.label}
+        </Link>
+      ))}
+    </nav>
+  )
+}

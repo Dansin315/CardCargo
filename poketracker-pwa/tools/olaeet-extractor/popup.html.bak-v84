@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>CardCargo OLAEET</title>
+    <style>
+      body { font: 14px system-ui, sans-serif; width: 300px; padding: 16px; margin: 0; }
+      h1 { font-size: 16px; margin: 0 0 8px; }
+      p { line-height: 1.4; }
+      button { width: 100%; padding: 10px 12px; cursor: pointer; }
+      #status { margin-top: 10px; min-height: 20px; }
+    </style>
+  </head>
+  <body>
+    <h1>CardCargo OLAEET Extractor</h1>
+    <p>Kopiert deine aktuelle Textauswahl. Wenn nichts ausgewählt ist, wird der sichtbare Text der ganzen Seite kopiert.</p>
+    <button id="copy" type="button">OLAEET-Daten kopieren</button>
+    <div id="status" role="status"></div>
+    <script src="popup.js"></script>
+  </body>
+</html>

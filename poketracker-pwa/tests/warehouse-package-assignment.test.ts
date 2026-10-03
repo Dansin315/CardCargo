@@ -7,9 +7,9 @@ import {
 } from '@/lib/warehouse-packages'
 
 const purchases: PackagePurchaseChoice[] = [
-  { id: 'purchase-a', title: 'A', source_listing_id: null, purchased_at: null, status: 'ordered' },
-  { id: 'purchase-b', title: 'B', source_listing_id: null, purchased_at: null, status: 'ordered' },
-  { id: 'purchase-c', title: 'C', source_listing_id: null, purchased_at: null, status: 'ordered' },
+  { id: 'purchase-a', title: 'A', source_listing_id: null, purchased_at: null, status: 'ordered', seller_name: 'Seller A', price_amount: 1000, currency: 'KRW' },
+  { id: 'purchase-b', title: 'B', source_listing_id: null, purchased_at: null, status: 'ordered', seller_name: 'Seller B', price_amount: 2000, currency: 'KRW' },
+  { id: 'purchase-c', title: 'C', source_listing_id: null, purchased_at: null, status: 'ordered', seller_name: 'Seller C', price_amount: 3000, currency: 'KRW' },
 ]
 
 const links: WarehousePackagePurchaseLink[] = [

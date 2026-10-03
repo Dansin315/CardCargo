@@ -12,17 +12,42 @@ import { purchaseImageCategoryLabels } from '@/lib/purchase-image-categories'
 import { loadPurchaseShipmentCostAllocation } from '@/lib/shipment-cost-allocation-queries'
 import { shipmentLabel, shippingServiceLabels } from '@/lib/shipments'
 import type { PurchaseImageCategory, PurchaseRow } from '@/lib/types'
+import { PurchaseDomesticTrackingEditor } from '@/components/purchase-domestic-tracking-editor'
 
 
 export const metadata: Metadata = { title: 'Einkaufsdetails' }
 export const dynamic = 'force-dynamic'
+
+type PurchaseListingDetail = {
+  title: string
+  description: string
+  listingUrl: string
+  canonicalUrl: string | null
+}
+
+function readGroupedPurchaseListings(rawMetadata: unknown): PurchaseListingDetail[] {
+  if (!rawMetadata || typeof rawMetadata !== 'object' || Array.isArray(rawMetadata)) return []
+  const entries = (rawMetadata as { grouped_listings?: unknown }).grouped_listings
+  if (!Array.isArray(entries)) return []
+  return entries.flatMap((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
+    const value = entry as Record<string, unknown>
+    if (typeof value.title !== 'string' || typeof value.listingUrl !== 'string') return []
+    return [{
+      title: value.title,
+      description: typeof value.description === 'string' ? value.description : '',
+      listingUrl: value.listingUrl,
+      canonicalUrl: typeof value.canonicalUrl === 'string' ? value.canonicalUrl : null,
+    }]
+  })
+}
 
 export default async function PurchaseDetailPage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ created?: string; updated?: string; warnings?: string }>
+  searchParams: Promise<{ created?: string; merged?: string; updated?: string; warnings?: string }>
 }) {
   const { id } = await params
   const query = await searchParams
@@ -34,13 +59,15 @@ export default async function PurchaseDetailPage({
   const { data, error } = await supabase
     .from('purchases')
     .select(
-      'id, source, source_listing_id, listing_url, canonical_url, title, description, seller_name, price_amount, price_currency, domestic_shipping_amount, service_fee_amount, purchased_at, status, created_at, updated_at, purchase_images(id, storage_path, source_url, original_filename, mime_type, byte_size, position, kind, category)',
+      'id, source, source_listing_id, listing_url, canonical_url, title, description, seller_name, price_amount, price_currency, domestic_shipping_amount, domestic_carrier, domestic_tracking_number, service_fee_amount, purchased_at, status, created_at, updated_at, raw_metadata, purchase_images(id, storage_path, source_url, original_filename, mime_type, byte_size, position, kind, category)',
     )
     .eq('id', id)
     .single()
 
   if (error || !data) notFound()
-  const purchase = data as unknown as PurchaseRow
+  const purchase = data as unknown as PurchaseRow & { raw_metadata?: unknown }
+  const groupedListings = readGroupedPurchaseListings(purchase.raw_metadata)
+  const isGroupedPurchase = groupedListings.length > 1
   const [images, shipmentCostAllocation] = await Promise.all([
     Promise.all(
       [...(purchase.purchase_images ?? [])]
@@ -63,6 +90,11 @@ export default async function PurchaseDetailPage({
       {query.created === '1' ? (
         <div className="alert alert-success">
           Einkauf und {images.length} Angebotsbild{images.length === 1 ? '' : 'er'} wurden erfolgreich gespeichert.
+        </div>
+      ) : null}
+      {query.merged === '1' ? (
+        <div className="alert alert-success">
+          Das Angebot wurde mit dem bestehenden Einkauf desselben Verkäufers und Kaufdatums zusammengefasst.
         </div>
       ) : null}
 
@@ -104,14 +136,20 @@ export default async function PurchaseDetailPage({
               purchase.price_currency,
             )}
           </strong>
-          <a
-            className="button button-secondary"
-            href={purchase.canonical_url || purchase.listing_url}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Originalangebot öffnen ↗
-          </a>
+          {isGroupedPurchase ? (
+            <a className="button button-secondary" href="#purchase-descriptions">
+              Originalangebote anzeigen ↓
+            </a>
+          ) : (
+            <a
+              className="button button-secondary"
+              href={purchase.canonical_url || purchase.listing_url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Originalangebot öffnen ↗
+            </a>
+          )}
           <div className="detail-actions">
             <Link className="button button-primary" href={`/purchases/${purchase.id}/edit`}>
               Bearbeiten
@@ -236,8 +274,31 @@ export default async function PurchaseDetailPage({
               <dd>{formatDate(purchase.created_at)}</dd>
             </div>
           </dl>
-          {purchase.description ? (
-            <div className="description-block">
+          <PurchaseDomesticTrackingEditor
+            purchaseId={purchase.id}
+            domesticCarrier={purchase.domestic_carrier ?? null}
+            domesticTrackingNumber={purchase.domestic_tracking_number ?? null}
+          />
+          {isGroupedPurchase ? (
+            <div className="description-block" id="purchase-descriptions">
+              <span className="section-label">Beschreibung / Originalangebote</span>
+              <div className="purchase-description-list">
+                {groupedListings.map((entry, index) => (
+                  <div key={`${entry.canonicalUrl || entry.listingUrl}-${index}`}>
+                    {index > 0 ? <div className="purchase-description-separator">&&</div> : null}
+                    <article className="purchase-description-entry">
+                      <strong>{entry.title}</strong>
+                      {entry.description ? <p>{entry.description}</p> : <p className="muted">Keine Beschreibung erfasst.</p>}
+                      <a href={entry.canonicalUrl || entry.listingUrl} target="_blank" rel="noreferrer">
+                        Originalangebot öffnen ↗
+                      </a>
+                    </article>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : purchase.description ? (
+            <div className="description-block" id="purchase-descriptions">
               <span className="section-label">Beschreibung / Notizen</span>
               <p>{purchase.description}</p>
             </div>

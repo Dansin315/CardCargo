@@ -19,6 +19,8 @@ import {
   inventoryLanguageOptions,
 } from '@/lib/inventory-languages'
 
+import { ConnectedInventoryModel } from '@/components/connected-inventory-model'
+import { InventoryShipmentFilter } from '@/components/inventory-shipment-filter'
 export type InventoryWorkspaceImage = {
   id: string
   signedUrl: string | null
@@ -996,7 +998,7 @@ function InventoryImagesModal({
             {unit.images.length ? (
               <div className="inv-image-grid">
                 {unit.images.map((image) => (
-                  <article className="inv-image-card" key={image.id}>
+                  <article className="inv-image-card" key={image.id} data-cc-record-card="true">
                     {image.signedUrl ? <img src={image.signedUrl} alt={image.originalFilename || 'Inventarbild'} /> : <div className="inv-image-placeholder">Kein Preview</div>}
                     <div>
                       <strong>{image.originalFilename || 'Inventarbild'}</strong>
@@ -1466,7 +1468,9 @@ export function InventoryWorkspace({
   }
 
   return (
-    <div className="inventory-figma-shell inventory-v32-shell">
+    <div className="inventory-figma-shell inventory-v32-shell" data-cc-anydb="inventory">
+      <ConnectedInventoryModel />
+      <InventoryShipmentFilter />
       <section className="inv-topbar">
         <div className="inv-brand">
           <span className="inv-brand-mark"><InventoryMark /></span>
@@ -1609,7 +1613,7 @@ export function InventoryWorkspace({
           </header>
 
           <div className="inv-table-scroll">
-            <table className="inv-table inv-table-v32">
+            <table className="inv-table inv-table-v32" data-cc-table="inventory">
               <thead>
                 <tr>
                   <th className="inv-check-cell">

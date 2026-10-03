@@ -1,9 +1,15 @@
 'use client'
 
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, useSyncExternalStore, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import type { ListingPreview, PurchaseStatus, StagedImageInput } from '@/lib/types'
+import { parseBunjangOrderImport, type BunjangOrderRecord } from '@/lib/bunjang-order-import'
+import { BUNJANG_ORDER_CACHE_KEY, rankBunjangOrderMatches } from '@/lib/bunjang-order-match'
+import {
+  BunjangExistingPurchaseMatches,
+  type ExistingBunjangPurchaseMatch,
+} from '@/components/bunjang-existing-purchase-matches'
 
 const MAX_IMAGES = 12
 const MAX_FILE_BYTES = 6 * 1024 * 1024
@@ -57,6 +63,10 @@ function readableFileSize(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
+function digitsOnlyInput(value: string) {
+  return value.replace(/\D+/g, '')
+}
+
 export function PurchaseImportForm({ userId }: { userId: string }) {
   const router = useRouter()
   const [url, setUrl] = useState('')
@@ -69,6 +79,29 @@ export function PurchaseImportForm({ userId }: { userId: string }) {
   const [previewing, setPreviewing] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  const bunjangOrderCacheSnapshot = useSyncExternalStore(
+    () => () => {},
+    () => {
+      try {
+        return localStorage.getItem(BUNJANG_ORDER_CACHE_KEY) ?? ''
+      } catch {
+        return ''
+      }
+    },
+    () => '',
+  )
+
+  const cachedBunjangOrders = useMemo(() => {
+    if (!bunjangOrderCacheSnapshot) return []
+    return parseBunjangOrderImport(bunjangOrderCacheSnapshot).records
+  }, [bunjangOrderCacheSnapshot])
+  const [selectedBunjangOrder, setSelectedBunjangOrder] = useState<BunjangOrderRecord | null>(null)
+  const [bunjangOrderMessage, setBunjangOrderMessage] = useState<string | null>(null)
+  const [existingBunjangTarget, setExistingBunjangTarget] = useState<{
+    id: string
+    title: string
+    orderId: string
+  } | null>(null)
 
   useEffect(() => {
     localImagesRef.current = localImages
@@ -213,6 +246,135 @@ export function PurchaseImportForm({ userId }: { userId: string }) {
     await supabase.storage.from('listing-images').remove(images.map((image) => image.path))
   }
 
+  async function resolveExistingBunjangOrder(orderId: string) {
+    const response = await fetch(
+      `/api/purchases/bunjang-order-target?orderId=${encodeURIComponent(orderId)}`,
+      { cache: 'no-store' },
+    )
+
+    const result = (await response.json()) as {
+      purchase?: { id: string; title: string } | null
+      error?: string
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        result.error ||
+          'Bestehender Bunjang-Einkauf konnte nicht geprüft werden.',
+      )
+    }
+
+    return result.purchase
+      ? {
+          ...result.purchase,
+          orderId,
+        }
+      : null
+  }
+
+  async function applyBunjangOrder(record: BunjangOrderRecord) {
+    setSelectedBunjangOrder(record)
+    setExistingBunjangTarget(null)
+
+    setFields((current) => ({
+      ...current,
+      title: current.title || record.title || '',
+      sellerName: record.sellerName || current.sellerName,
+      priceAmount:
+        record.productAmount === null
+          ? current.priceAmount
+          : String(record.productAmount),
+      domesticShippingAmount:
+        record.domesticShippingAmount === null
+          ? current.domesticShippingAmount
+          : String(record.domesticShippingAmount),
+      purchasedAt: record.purchasedAt || current.purchasedAt,
+      status:
+        record.domesticTrackingNumber &&
+        ['planned', 'ordered', 'paid'].includes(current.status)
+          ? 'shipped_domestic'
+          : current.status,
+    }))
+
+    try {
+      const target = await resolveExistingBunjangOrder(record.orderId)
+      setExistingBunjangTarget(target)
+
+      setBunjangOrderMessage(
+        target
+          ? `Bestehender CardCargo-Einkauf „${target.title}“ gefunden. Beim Speichern werden URL, Listing-Daten und Bilder in diesem Einkauf ergänzt; es wird kein neuer Einkauf erstellt.`
+          : `Bunjang-Bestellung ${record.orderId} übernommen. Für diese Bestellnummer existiert noch kein CardCargo-Einkauf.`,
+      )
+    } catch (error) {
+      setBunjangOrderMessage(
+        error instanceof Error
+          ? error.message
+          : 'Bestehender Bunjang-Einkauf konnte nicht geprüft werden.',
+      )
+    }
+  }
+
+  function applyExistingBunjangPurchase(
+    match: ExistingBunjangPurchaseMatch,
+  ) {
+    setSelectedBunjangOrder(null)
+    setExistingBunjangTarget({
+      id: match.id,
+      title: match.title,
+      orderId: match.orderId,
+    })
+
+    // The already synchronized Order data is authoritative for transaction
+    // fields. Listing title/description/images continue to come from the URL.
+    setFields((current) => ({
+      ...current,
+      sellerName: match.sellerName || current.sellerName,
+      priceAmount:
+        match.priceAmount === null
+          ? current.priceAmount
+          : String(match.priceAmount),
+      domesticShippingAmount:
+        match.domesticShippingAmount === null
+          ? current.domesticShippingAmount
+          : String(match.domesticShippingAmount),
+      purchasedAt: match.purchasedAt || current.purchasedAt,
+      status:
+        match.domesticTrackingNumber &&
+        ['planned', 'ordered', 'paid'].includes(current.status)
+          ? 'shipped_domestic'
+          : current.status,
+    }))
+
+    setBunjangOrderMessage(
+      `Bestehender CardCargo-Einkauf „${match.title}“ ausgewählt. Beim Speichern werden Listing-ID, URL, Beschreibung und Bilder in diesem Einkauf ergänzt; es wird kein neuer Einkauf angelegt.`,
+    )
+  }
+
+  async function loadBunjangOrderExtraction() {
+    setBunjangOrderMessage(null)
+    try {
+      const text = await navigator.clipboard.readText()
+      const parsed = parseBunjangOrderImport(text)
+      if (!parsed.records.length) {
+        throw new Error(
+          parsed.warnings[0] ||
+            'Keine Bunjang-Bestellungen in der Zwischenablage erkannt.',
+        )
+      }
+      localStorage.setItem(BUNJANG_ORDER_CACHE_KEY, text)
+
+      setBunjangOrderMessage(
+        `${parsed.records.length} Bunjang-Bestellung(en) geladen. Wähle den passenden Treffer.`,
+      )
+    } catch (error) {
+      setBunjangOrderMessage(
+        error instanceof Error
+          ? error.message
+          : 'Bunjang-Extraction konnte nicht geladen werden.',
+      )
+    }
+  }
+
   async function submitPurchase(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setMessage(null)
@@ -248,32 +410,140 @@ export function PurchaseImportForm({ userId }: { userId: string }) {
 
     try {
       stagedImages = await stageLocalImages()
-      const response = await fetch('/api/purchases', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          source: 'bunjang',
-          listingUrl: url,
-          canonicalUrl: preview?.canonicalUrl ?? url,
-          externalId: preview?.externalId ?? null,
-          title: fields.title,
-          description: fields.description,
-          sellerName: fields.sellerName,
-          priceAmount: numericPrice,
-          domesticShippingAmount: numericDomesticShipping,
-          priceCurrency: fields.priceCurrency.toUpperCase(),
-          purchasedAt: fields.purchasedAt || null,
-          status: fields.status,
-          remoteImageUrls: selectedRemoteImages,
-          stagedImages,
-        }),
-      })
-      const result = (await response.json()) as { id?: string; error?: string; warnings?: string[] }
-      if (!response.ok || !result.id) throw new Error(result.error || 'Der Einkauf konnte nicht gespeichert werden.')
+      const listingPayload = {
+        source: 'bunjang' as const,
+        listingUrl: url,
+        canonicalUrl: preview?.canonicalUrl ?? url,
+        externalId: preview?.externalId ?? null,
+        title: fields.title,
+        description: fields.description,
+        sellerName: fields.sellerName,
+        priceAmount: numericPrice,
+        domesticShippingAmount: numericDomesticShipping,
+        priceCurrency: fields.priceCurrency.toUpperCase(),
+        purchasedAt: fields.purchasedAt || null,
+        status: fields.status,
+        remoteImageUrls: selectedRemoteImages,
+        stagedImages,
+      }
 
-      const warningCount = result.warnings?.length ?? 0
-      const warningQuery = warningCount ? `&warnings=${warningCount}` : ''
-      router.push(`/purchases/${result.id}?created=1${warningQuery}`)
+      let resultId: string | null = null
+      let warnings: string[] = []
+      let enrichedExisting = false
+
+      let targetForListing = existingBunjangTarget
+
+      if (selectedBunjangOrder) {
+        // Resolve immediately before saving. Do not trust only the UI state:
+        // another sync may have created the purchase since the order was selected.
+        const resolvedTarget = await resolveExistingBunjangOrder(
+          selectedBunjangOrder.orderId,
+        )
+
+        if (resolvedTarget) {
+          targetForListing = resolvedTarget
+          setExistingBunjangTarget(resolvedTarget)
+        }
+      }
+
+      if (targetForListing) {
+          const enrichmentResponse = await fetch(
+            `/api/purchases/${targetForListing.id}/bunjang-listing-enrichment`,
+            {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                orderId: targetForListing.orderId,
+                listing: listingPayload,
+              }),
+            },
+          )
+
+          const enrichmentResult = (await enrichmentResponse.json()) as {
+            id?: string
+            error?: string
+            warnings?: string[]
+          }
+
+          if (!enrichmentResponse.ok || !enrichmentResult.id) {
+            throw new Error(
+              enrichmentResult.error ||
+                'Der bestehende Einkauf konnte nicht um die Listing-Daten ergänzt werden.',
+            )
+          }
+
+          resultId = enrichmentResult.id
+          warnings = enrichmentResult.warnings ?? []
+          enrichedExisting = true
+        }
+
+      if (!resultId) {
+        const response = await fetch('/api/purchases', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(listingPayload),
+        })
+
+        const result = (await response.json()) as {
+          id?: string
+          error?: string
+          warnings?: string[]
+        }
+
+        if (!response.ok || !result.id) {
+          throw new Error(
+            result.error || 'Der Einkauf konnte nicht gespeichert werden.',
+          )
+        }
+
+        resultId = result.id
+        warnings = result.warnings ?? []
+
+        if (selectedBunjangOrder) {
+          try {
+            const enrichmentResponse = await fetch(
+              `/api/purchases/${resultId}/bunjang-order-enrichment`,
+              {
+                method: 'PATCH',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                  record: selectedBunjangOrder,
+                  autoAssignOlaeet: true,
+                }),
+              },
+            )
+
+            const enrichmentResult = (await enrichmentResponse.json()) as {
+              error?: string
+              warnings?: string[]
+            }
+
+            if (!enrichmentResponse.ok) {
+              warnings.push(
+                enrichmentResult.error ||
+                  'Bunjang-Bestelldaten konnten nicht vollständig ergänzt werden.',
+              )
+            } else {
+              warnings.push(...(enrichmentResult.warnings ?? []))
+            }
+          } catch (error) {
+            warnings.push(
+              error instanceof Error
+                ? error.message
+                : 'Bunjang-Bestelldaten-Enrichment fehlgeschlagen.',
+            )
+          }
+        }
+      }
+
+      const warningQuery = warnings.length
+        ? `&warnings=${warnings.length}`
+        : ''
+      const resultFlag = enrichedExisting ? 'enriched=1' : 'created=1'
+
+      router.push(
+        `/purchases/${resultId}?${resultFlag}${warningQuery}`,
+      )
       router.refresh()
     } catch (error) {
       await cleanupStagedImages(stagedImages)
@@ -281,6 +551,16 @@ export function PurchaseImportForm({ userId }: { userId: string }) {
       setSubmitting(false)
     }
   }
+
+  const bunjangOrderMatches = rankBunjangOrderMatches(
+    {
+      externalId: preview?.externalId ?? null,
+      title: fields.title,
+      sellerName: fields.sellerName,
+      priceAmount: fields.priceAmount.trim() ? Number(fields.priceAmount) : null,
+    },
+    cachedBunjangOrders,
+  )
 
   return (
     <div className="import-flow">
@@ -292,22 +572,30 @@ export function PurchaseImportForm({ userId }: { userId: string }) {
           </div>
           <span className="panel-note">Nur öffentliche Bunjang-Links</span>
         </div>
-        <div className="url-row">
+        <form
+          className="url-row"
+          onSubmit={(event) => {
+            event.preventDefault()
+            if (!url || previewing) return
+            void loadPreview()
+          }}
+        >
           <input
             aria-label="Bunjang-Angebots-URL"
+            autoFocus
             type="url"
             placeholder="https://m.bunjang.co.kr/products/…"
             value={url}
             onChange={(event) => setUrl(event.target.value)}
             required
           />
-          <button className="button button-primary" type="button" onClick={loadPreview} disabled={!url || previewing}>
+          <button className="button button-primary" type="submit" disabled={!url || previewing}>
             {previewing ? 'Analysiere …' : 'Vorschau laden'}
           </button>
           <button className="button button-secondary" type="button" onClick={enableManualMode} disabled={!url}>
             Manuell
           </button>
-        </div>
+        </form>
         <p className="help-text">
           Die App speichert die URL, liest verfügbare Metadaten und archiviert ausgewählte Angebotsbilder im privaten Storage.
         </p>
@@ -363,23 +651,25 @@ export function PurchaseImportForm({ userId }: { userId: string }) {
               <label>
                 Preis
                 <input
-                  type="number"
-                  min="0"
-                  step="1"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   value={fields.priceAmount}
-                  onChange={(event) => setFields({ ...fields, priceAmount: event.target.value })}
+                  onChange={(event) =>
+                    setFields({ ...fields, priceAmount: digitsOnlyInput(event.target.value) })
+                  }
                   placeholder="60000"
                 />
               </label>
               <label>
                 Versandkosten in Korea
                 <input
-                  type="number"
-                  min="0"
-                  step="1"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   value={fields.domesticShippingAmount}
                   onChange={(event) =>
-                    setFields({ ...fields, domesticShippingAmount: event.target.value })
+                    setFields({ ...fields, domesticShippingAmount: digitsOnlyInput(event.target.value) })
                   }
                   placeholder="4000"
                 />
@@ -420,10 +710,142 @@ export function PurchaseImportForm({ userId }: { userId: string }) {
             </div>
           </section>
 
-          <section className="panel">
+                    <section className="panel">
             <div className="panel-heading">
               <div>
                 <span className="step-number">3</span>
+                <h2>Bunjang-Bestelldaten</h2>
+              </div>
+              <span className="panel-note">URL-Import + Order-Extraction</span>
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+              <button
+                className="button button-secondary"
+                type="button"
+                onClick={loadBunjangOrderExtraction}
+              >
+                Extraction aus Zwischenablage laden
+              </button>
+              {selectedBunjangOrder ? (
+                <button
+                  className="button button-ghost"
+                  type="button"
+                  onClick={() => {
+                    setSelectedBunjangOrder(null)
+                    setExistingBunjangTarget(null)
+                    setBunjangOrderMessage('Bestellzuordnung entfernt.')
+                  }}
+                >
+                  Bestellzuordnung entfernen
+                </button>
+              ) : null}
+            </div>
+
+            {bunjangOrderMessage ? (
+              <div className="alert alert-info">{bunjangOrderMessage}</div>
+            ) : null}
+
+            {selectedBunjangOrder ? (
+              <article style={{ border: '1px solid var(--border, #ddd)', borderRadius: 14, padding: 14 }}>
+                <strong>
+                  Zugeordnet: {selectedBunjangOrder.title || `Bestellung ${selectedBunjangOrder.orderId}`}
+                </strong>
+                <div>Bestellnummer {selectedBunjangOrder.orderId}</div>
+                {existingBunjangTarget ? (
+                  <div>
+                    <strong>Bestehender Einkauf:</strong>{' '}
+                    {existingBunjangTarget.title} · wird ergänzt, nicht neu angelegt
+                  </div>
+                ) : null}
+                <div>
+                  {selectedBunjangOrder.sellerName || 'Verkäufer ?'} ·{' '}
+                  {selectedBunjangOrder.purchasedAt || 'Kaufdatum ?'}
+                </div>
+                <div>
+                  {selectedBunjangOrder.domesticCarrier || 'Carrier ?'} ·{' '}
+                  {selectedBunjangOrder.domesticTrackingNumber || 'Tracking noch nicht vorhanden'}
+                </div>
+              </article>
+            ) : bunjangOrderMatches.length ? (
+              <div style={{ display: 'grid', gap: 10 }}>
+                {bunjangOrderMatches.slice(0, 5).map((match) => (
+                  <article
+                    key={match.record.orderId}
+                    style={{
+                      border: '1px solid var(--border, #ddd)',
+                      borderRadius: 14,
+                      padding: 14,
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      gap: 14,
+                      alignItems: 'center',
+                    }}
+                  >
+                    <div>
+                      <strong>{match.record.title || `Bestellung ${match.record.orderId}`}</strong>
+                      <div>
+                        #{match.record.orderId} · {match.record.sellerName || 'Verkäufer ?'} ·{' '}
+                        {match.record.productAmount === null
+                          ? 'Preis ?'
+                          : `${match.record.productAmount.toLocaleString('de-DE')} KRW`}
+                      </div>
+                      <small>
+                        {match.confidence === 'exact'
+                          ? 'Exakter Treffer'
+                          : match.confidence === 'strong'
+                            ? 'Sehr wahrscheinlicher Treffer'
+                            : 'Möglicher Treffer'}
+                        {' · '}
+                        {match.reasons.join(', ')}
+                      </small>
+                    </div>
+                    <button
+                      className="button button-secondary"
+                      type="button"
+                      onClick={() => applyBunjangOrder(match.record)}
+                    >
+                      Bestelldaten übernehmen
+                    </button>
+                  </article>
+                ))}
+              </div>
+            ) : cachedBunjangOrders.length ? (
+              <p className="help-text">Keine passende Bestellung im lokalen Extraction-Cache gefunden. Bereits gespeicherte CardCargo-Bestellungen werden zusätzlich darunter geprüft.</p>
+            ) : (
+              <p className="help-text">
+                Führe den Bunjang Order Extractor aus und lade die Extraction hier oder auf der
+                Seite „Bunjang Einkäufe importieren“ ein.
+              </p>
+            )}
+          
+
+            <BunjangExistingPurchaseMatches
+            externalId={preview?.externalId ?? null}
+            title={fields.title}
+            sellerName={fields.sellerName}
+            priceAmount={
+            fields.priceAmount.trim()
+            ? Number(fields.priceAmount)
+            : null
+            }
+            selectedPurchaseId={existingBunjangTarget?.id ?? null}
+            onUse={applyExistingBunjangPurchase}
+            onClear={() => {
+            setExistingBunjangTarget(null)
+            setSelectedBunjangOrder(null)
+            setBunjangOrderMessage(
+            'Bestellzuordnung entfernt. Beim Speichern wird dieser bestehende Einkauf nicht mehr automatisch ergänzt.',
+            )
+            }}
+            />
+          </section>
+
+
+<section className="panel">
+            <div className="panel-heading">
+              <div>
+                <span className="step-number">4</span>
                 <h2>Angebotsbilder archivieren</h2>
               </div>
               <span className="panel-note">
@@ -503,3 +925,5 @@ export function PurchaseImportForm({ userId }: { userId: string }) {
     </div>
   )
 }
+
+/* v62 existingBunjangTarget?.orderId is used through targetForListing.orderId */

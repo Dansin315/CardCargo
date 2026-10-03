@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "CardCargo OLAEET Extractor",
+  "version": "2.0.0",
+  "description": "Extrahiert OLAEET-Pakete und internationale Sendungsdetails für CardCargo.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "clipboardWrite"
+  ],
+  "action": {
+    "default_title": "OLAEET-Daten für CardCargo extrahieren",
+    "default_popup": "popup.html"
+  }
+}

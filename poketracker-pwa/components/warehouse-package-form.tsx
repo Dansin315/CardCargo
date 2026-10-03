@@ -4,17 +4,17 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ChangeEvent,
   type FormEvent,
 } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { purchaseImageCategoryLabels } from '@/lib/purchase-image-categories'
+import styles from './warehouse-package-assignment.module.css'
 import type { StagedImageInput } from '@/lib/types'
 import {
   addDaysToDate,
-  filterPurchaseImagesForSelection,
   isValidDateOnly,
   packageStatusLabels,
   packageStatuses,
@@ -77,6 +77,70 @@ function fileExtension(mimeType: string) {
 function readableFileSize(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
+function dateTimestamp(value: string | null | undefined) {
+  if (!value || !isValidDateOnly(value)) return null
+  const timestamp = Date.parse(`${value}T00:00:00Z`)
+  return Number.isNaN(timestamp) ? null : timestamp
+}
+
+function subtractDaysFromDate(value: string | null | undefined, days: number) {
+  const timestamp = dateTimestamp(value)
+  if (timestamp === null || !Number.isInteger(days)) return ''
+  const date = new Date(timestamp)
+  date.setUTCDate(date.getUTCDate() - days)
+  return date.toISOString().slice(0, 10)
+}
+
+function purchaseDistanceDays(purchasedAt: string | null, arrivedAt: string) {
+  const purchaseTime = dateTimestamp(purchasedAt)
+  const arrivalTime = dateTimestamp(arrivedAt)
+  if (purchaseTime === null || arrivalTime === null) return Number.POSITIVE_INFINITY
+  return Math.abs(arrivalTime - purchaseTime) / 86_400_000
+}
+
+function isLikelyPurchaseDate(purchasedAt: string | null, arrivedAt: string) {
+  const purchaseTime = dateTimestamp(purchasedAt)
+  const arrivalTime = dateTimestamp(arrivedAt)
+  if (purchaseTime === null || arrivalTime === null) return false
+  const diffDays = (arrivalTime - purchaseTime) / 86_400_000
+  return diffDays >= 0 && diffDays <= 45
+}
+
+function formatPurchasePrice(amount: number | null, currency: string) {
+  if (amount === null || amount === undefined || !Number.isFinite(Number(amount))) return null
+  return `${new Intl.NumberFormat('de-DE', { maximumFractionDigits: 0 }).format(Number(amount))} ${currency || 'KRW'}`
+}
+
+function normalizePurchaseSearchValue(value: string | null | undefined) {
+  return String(value ?? '')
+    .normalize('NFKC')
+    .toLocaleLowerCase()
+    .replace(/[’‘`´]/g, "'")
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim()
+    .replace(/\s+/g, ' ')
+}
+
+function purchaseMatchesSearch(purchase: PackagePurchaseChoice, query: string) {
+  const normalizedQuery = normalizePurchaseSearchValue(query)
+  if (!normalizedQuery) return true
+
+  const listingId = String(purchase.source_listing_id ?? '')
+  const haystack = normalizePurchaseSearchValue(
+    [
+      purchase.title,
+      purchase.seller_name,
+      listingId,
+      listingId ? `Bunjang ${listingId}` : '',
+      listingId ? `Bunjang #${listingId}` : '',
+    ]
+      .filter(Boolean)
+      .join(' '),
+  )
+
+  const tokens = normalizedQuery.split(' ').filter(Boolean)
+  return tokens.every((token) => haystack.includes(token))
+}
 
 export function WarehousePackageForm({
   mode,
@@ -94,6 +158,16 @@ export function WarehousePackageForm({
   const [selectedPurchases, setSelectedPurchases] = useState<string[]>(selectedPurchaseIds)
   const [removedManualImageIds, setRemovedManualImageIds] = useState<string[]>([])
   const [localImages, setLocalImages] = useState<LocalImage[]>([])
+  const [purchaseSearch, setPurchaseSearch] = useState('')
+  const initialArrivalDate = toDateInput(packageData?.arrived_at)
+  const [purchaseDateFrom, setPurchaseDateFrom] = useState(
+    subtractDaysFromDate(initialArrivalDate, 45),
+  )
+  const [purchaseDateTo, setPurchaseDateTo] = useState(initialArrivalDate)
+  const [purchaseDateFilterTouched, setPurchaseDateFilterTouched] = useState(false)
+  const [purchaseSort, setPurchaseSort] = useState<
+    'closest' | 'date_desc' | 'date_asc' | 'price_desc' | 'price_asc' | 'title'
+  >('closest')
   const localImagesRef = useRef<LocalImage[]>([])
   const storageDeadlineAt = addDaysToDate(arrivedAt, 80)
 
@@ -113,6 +187,27 @@ export function WarehousePackageForm({
         ? current.filter((id) => id !== purchaseId)
         : [...current, purchaseId],
     )
+  }
+
+  function handleArrivedAtChange(value: string) {
+    setArrivedAt(value)
+    if (!purchaseDateFilterTouched) {
+      setPurchaseDateFrom(subtractDaysFromDate(value, 45))
+      setPurchaseDateTo(value)
+    }
+  }
+
+  function applyLikelyDateWindow() {
+    if (!arrivedAt) return
+    setPurchaseDateFrom(subtractDaysFromDate(arrivedAt, 45))
+    setPurchaseDateTo(arrivedAt)
+    setPurchaseDateFilterTouched(false)
+  }
+
+  function clearPurchaseDateFilter() {
+    setPurchaseDateFrom('')
+    setPurchaseDateTo('')
+    setPurchaseDateFilterTouched(true)
   }
 
   function toggleExistingManualImage(imageId: string) {
@@ -279,13 +374,79 @@ export function WarehousePackageForm({
   }
 
   const cancelHref = packageData ? `/warehouse-packages/${packageData.id}` : '/warehouse-packages'
-  const selectedPurchaseImages = filterPurchaseImagesForSelection(
-    purchaseImages,
-    selectedPurchases,
-  )
   const visibleManualImages = manualImages.filter(
     (image) => !removedManualImageIds.includes(image.id),
   )
+  const packagePreviewImage = visibleManualImages.find((image) => image.signed_url)
+  const purchaseImageByPurchaseId = useMemo(() => {
+    const result = new Map<string, PackagePurchaseImageChoice>()
+    for (const image of purchaseImages) {
+      const existing = result.get(image.purchase_id)
+      if (!existing || image.position < existing.position) result.set(image.purchase_id, image)
+    }
+    return result
+  }, [purchaseImages])
+  const filteredPurchases = useMemo(() => {
+    const filtered = purchases.filter((purchase) => {
+      if (!purchaseMatchesSearch(purchase, purchaseSearch)) return false
+
+      if (purchaseDateFrom && (!purchase.purchased_at || purchase.purchased_at < purchaseDateFrom)) {
+        return false
+      }
+
+      if (purchaseDateTo && (!purchase.purchased_at || purchase.purchased_at > purchaseDateTo)) {
+        return false
+      }
+
+      return true
+    })
+
+    return [...filtered].sort((a, b) => {
+      const selectionOrder =
+        Number(selectedPurchases.includes(b.id)) - Number(selectedPurchases.includes(a.id))
+
+      if (selectionOrder !== 0) return selectionOrder
+
+      if (purchaseSort === 'closest') {
+        const distance =
+          purchaseDistanceDays(a.purchased_at, arrivedAt) -
+          purchaseDistanceDays(b.purchased_at, arrivedAt)
+
+        if (Number.isFinite(distance) && distance !== 0) return distance
+      }
+
+      if (purchaseSort === 'date_asc') {
+        return (a.purchased_at || '9999-12-31').localeCompare(
+          b.purchased_at || '9999-12-31',
+        )
+      }
+
+      if (purchaseSort === 'price_desc') {
+        return Number(b.price_amount ?? -1) - Number(a.price_amount ?? -1)
+      }
+
+      if (purchaseSort === 'price_asc') {
+        return (
+          Number(a.price_amount ?? Number.MAX_SAFE_INTEGER) -
+          Number(b.price_amount ?? Number.MAX_SAFE_INTEGER)
+        )
+      }
+
+      if (purchaseSort === 'title') {
+        return a.title.localeCompare(b.title, 'de')
+      }
+
+      return (b.purchased_at || '').localeCompare(a.purchased_at || '')
+    })
+  }, [
+    arrivedAt,
+    purchaseDateFrom,
+    purchaseDateTo,
+    purchaseSearch,
+    purchaseSort,
+    purchases,
+    selectedPurchases,
+  ])
 
   return (
     <form className="page-stack" onSubmit={submit}>
@@ -348,7 +509,7 @@ export function WarehousePackageForm({
         <div className="form-grid two-columns">
           <label>
             Eingang bei OLAEET
-            <input name="arrivedAt" type="date" value={arrivedAt} onChange={(event) => setArrivedAt(event.target.value)} />
+            <input name="arrivedAt" type="date" value={arrivedAt} onChange={(event) => handleArrivedAtChange(event.target.value)} />
           </label>
           <label>
             Inspektionsdatum
@@ -388,72 +549,221 @@ export function WarehousePackageForm({
         </div>
       </section>
 
-      <section className="panel">
+      <section className={`panel ${styles.assignmentPanel}`}>
         <div className="panel-heading">
           <div>
-            <h2>Enthaltene Einkäufe</h2>
-            <p>Ausgewählte Einkäufe zeigen ihre archivierten Bunjang-Bilder direkt darunter.</p>
+            <h2>Einkäufe diesem OLAEET-Paket zuordnen</h2>
+            <p>Paketdaten und mögliche Bunjang-Einkäufe direkt nebeneinander vergleichen.</p>
           </div>
-          <span className="panel-note">{purchases.length} verfügbar</span>
+          <span className="panel-note">{selectedPurchases.length} ausgewählt · {purchases.length} zuweisbar</span>
         </div>
-        {purchases.length ? (
-          <div className="purchase-checklist">
-            {purchases.map((purchase) => (
-              <label className="purchase-check" key={purchase.id}>
-                <input
-                  name="purchaseIds"
-                  type="checkbox"
-                  value={purchase.id}
-                  checked={selectedPurchases.includes(purchase.id)}
-                  onChange={() => togglePurchase(purchase.id)}
-                />
-                <span>
-                  <strong>{purchase.title}</strong>
-                  <small>
-                    {purchase.source_listing_id ? `Bunjang #${purchase.source_listing_id}` : 'Manuell'}
-                    {' · '}
-                    {purchase.purchased_at || 'ohne Kaufdatum'}
-                  </small>
-                </span>
-              </label>
-            ))}
-          </div>
-        ) : (
-          <div className="empty-state compact-empty">
-            <p>Keine zuweisbaren Einkäufe vorhanden. Bereits anderen OLAEET-Paketen zugeordnete Einkäufe werden hier nicht angezeigt.</p>
-          </div>
-        )}
 
-        {selectedPurchases.length ? (
-          <div className="package-inherited-images">
-            <span className="section-label">Bilder der ausgewählten Einkäufe</span>
-            {selectedPurchaseImages.length ? (
-              <div className="detail-gallery compact-gallery">
-                {selectedPurchaseImages.map((image) => {
-                  const purchase = purchases.find((item) => item.id === image.purchase_id)
+        <div className={styles.assignmentGrid}>
+          <aside className={styles.packageSummary}>
+            <div className={styles.packageSummaryHeader}>
+              <span className="section-label">Aktuelles OLAEET-Paket</span>
+              <strong>
+                {packageData?.external_package_id || packageData?.domestic_tracking_number || 'Neues OLAEET-Paket'}
+              </strong>
+              <small>{packageData?.sender_name || 'Absender noch nicht erfasst'}</small>
+            </div>
+
+            <div className={styles.packageImage}>
+              {packagePreviewImage?.signed_url ? (
+                <img
+                  src={packagePreviewImage.signed_url}
+                  alt={packagePreviewImage.original_filename || 'OLAEET-Paketbild'}
+                />
+              ) : (
+                <div className={styles.packageImagePlaceholder}>
+                  Noch kein Paketbild vorhanden. Ein OLAEET-/Inspektionsbild erleichtert die Zuordnung deutlich.
+                </div>
+              )}
+            </div>
+
+            <div className={styles.packageFacts}>
+              <div className={styles.factRow}>
+                <span>Eingang</span>
+                <strong>{arrivedAt || '–'}</strong>
+              </div>
+              <div className={styles.factRow}>
+                <span>Tracking</span>
+                <strong>{packageData?.domestic_tracking_number || '–'}</strong>
+              </div>
+              <div className={styles.factRow}>
+                <span>Paketdienst</span>
+                <strong>{packageData?.domestic_carrier || '–'}</strong>
+              </div>
+              <div className={styles.factRow}>
+                <span>Maße</span>
+                <strong>
+                  {packageData?.length_cm || packageData?.width_cm || packageData?.height_cm
+                    ? `${packageData?.length_cm ?? '?'} × ${packageData?.width_cm ?? '?'} × ${packageData?.height_cm ?? '?'} cm`
+                    : '–'}
+                </strong>
+              </div>
+              <div className={styles.factRow}>
+                <span>Status</span>
+                <strong>{packageData ? packageStatusLabels[packageData.status] : packageStatusLabels.expected}</strong>
+              </div>
+            </div>
+
+            <p className={styles.filterHint}>
+              Bereits anderen OLAEET-Paketen zugeordnete Einkäufe werden serverseitig ausgeblendet.
+            </p>
+          </aside>
+
+          <div className={styles.purchaseWorkspace}>
+            <div className={styles.filterBar}>
+              <label>
+                Einkauf suchen
+                <input
+                  type="search"
+                  value={purchaseSearch}
+                  onChange={(event) => setPurchaseSearch(event.target.value)}
+                  placeholder="Titel, Bunjang-ID, Verkäufer …"
+                />
+              </label>
+              <label>
+                Kaufdatum von
+                <input
+                  type="date"
+                  value={purchaseDateFrom}
+                  onChange={(event) => {
+                    setPurchaseDateFrom(event.target.value)
+                    setPurchaseDateFilterTouched(true)
+                  }}
+                />
+              </label>
+              <label>
+                Kaufdatum bis
+                <input
+                  type="date"
+                  value={purchaseDateTo}
+                  onChange={(event) => {
+                    setPurchaseDateTo(event.target.value)
+                    setPurchaseDateFilterTouched(true)
+                  }}
+                />
+              </label>
+              <label>
+                Sortierung
+                <select
+                  value={purchaseSort}
+                  onChange={(event) => setPurchaseSort(event.target.value as typeof purchaseSort)}
+                >
+                  <option value="closest">Nähe zum OLAEET-Eingang</option>
+                  <option value="date_desc">Kaufdatum: neu → alt</option>
+                  <option value="date_asc">Kaufdatum: alt → neu</option>
+                  <option value="price_desc">Preis: hoch → niedrig</option>
+                  <option value="price_asc">Preis: niedrig → hoch</option>
+                  <option value="title">Titel: A–Z</option>
+                </select>
+              </label>
+            </div>
+
+            <div className={styles.filterActions}>
+              <button
+                className="button button-secondary button-small"
+                type="button"
+                onClick={applyLikelyDateWindow}
+                disabled={!arrivedAt}
+              >
+                45 Tage vor Eingang
+              </button>
+              <button className="button button-ghost button-small" type="button" onClick={clearPurchaseDateFilter}>
+                Datumsfilter löschen
+              </button>
+              <span className={styles.filterHint}>{filteredPurchases.length} Treffer</span>
+            </div>
+
+            <div className={styles.selectionBar}>
+              <strong>
+                {selectedPurchases.length} Einkauf{selectedPurchases.length === 1 ? '' : 'e'} ausgewählt
+              </strong>
+              <div className={styles.selectionButtons}>
+                <button
+                  className="button button-secondary button-small"
+                  type="button"
+                  onClick={() =>
+                    setSelectedPurchases((current) =>
+                      Array.from(new Set([...current, ...filteredPurchases.map((purchase) => purchase.id)])),
+                    )
+                  }
+                  disabled={!filteredPurchases.length}
+                >
+                  Alle sichtbaren auswählen
+                </button>
+                <button
+                  className="button button-ghost button-small"
+                  type="button"
+                  onClick={() => setSelectedPurchases([])}
+                  disabled={!selectedPurchases.length}
+                >
+                  Auswahl leeren
+                </button>
+              </div>
+            </div>
+
+            {filteredPurchases.length ? (
+              <div className={styles.purchaseList}>
+                {filteredPurchases.map((purchase) => {
+                  const image = purchaseImageByPurchaseId.get(purchase.id)
+                  const selected = selectedPurchases.includes(purchase.id)
+                  const likely = isLikelyPurchaseDate(purchase.purchased_at, arrivedAt)
+                  const price = formatPurchasePrice(purchase.price_amount, purchase.currency)
                   return (
-                    <figure key={image.id}>
-                      {image.signed_url ? (
-                        <img src={image.signed_url} alt={`Angebotsbild von ${purchase?.title ?? 'Einkauf'}`} />
-                      ) : (
-                        <div className="missing-image">Bild nicht verfügbar</div>
-                      )}
-                      <figcaption>
-                        <span>{purchase?.title ?? 'Bunjang-Einkauf'}</span>
-                        <span>{purchaseImageCategoryLabels[image.category]} · über Einkaufszuordnung</span>
-                      </figcaption>
-                    </figure>
+                    <label
+                      className={`${styles.purchaseCard} ${selected ? styles.purchaseCardSelected : ''}`}
+                      key={purchase.id}
+                    >
+                      <input
+                        name="purchaseIds"
+                        type="checkbox"
+                        value={purchase.id}
+                        checked={selected}
+                        onChange={() => togglePurchase(purchase.id)}
+                      />
+                      <div className={styles.purchaseThumb}>
+                        {image?.signed_url ? (
+                          <img src={image.signed_url} alt={`Angebotsbild von ${purchase.title}`} />
+                        ) : (
+                          <div className={styles.purchaseThumbPlaceholder}>Kein Bild</div>
+                        )}
+                      </div>
+                      <span className={styles.purchaseInfo}>
+                        <strong>{purchase.title}</strong>
+                        <span className={styles.purchaseMeta}>
+                          <span>{purchase.source_listing_id ? `Bunjang #${purchase.source_listing_id}` : 'Manuell'}</span>
+                          <span>{purchase.purchased_at || 'ohne Kaufdatum'}</span>
+                          {purchase.seller_name ? <span>Verkäufer: {purchase.seller_name}</span> : null}
+                          {price ? <span>{price}</span> : null}
+                        </span>
+                        <span className={styles.badges}>
+                          {likely ? (
+                            <span className={`${styles.badge} ${styles.badgeLikely}`}>Zeitlich plausibel</span>
+                          ) : null}
+                          {selected ? (
+                            <span className={`${styles.badge} ${styles.badgeSelected}`}>Ausgewählt</span>
+                          ) : null}
+                        </span>
+                      </span>
+                    </label>
                   )
                 })}
               </div>
             ) : (
-              <p className="muted-copy">Für die ausgewählten Einkäufe sind keine Bilder verfügbar.</p>
+              <div className={styles.emptyFiltered}>
+                <strong>Keine passenden Einkäufe gefunden.</strong>
+                <p>
+                  Suche oder Datumsfilter anpassen. Bereits anderen Paketen zugeordnete Einkäufe sind hier nicht verfügbar.
+                </p>
+              </div>
             )}
           </div>
-        ) : null}
+        </div>
       </section>
-
-      <section className="panel">
+<section className="panel">
         <div className="panel-heading">
           <div>
             <h2>Manuelle OLAEET-Paketbilder</h2>

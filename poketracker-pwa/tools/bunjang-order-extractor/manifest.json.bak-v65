@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "CardCargo Bunjang Order Extractor",
+  "version": "3.0.0",
+  "description": "Bulk-/Smart-Sync für Bunjang-Bestellungen und Trackingdaten.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "clipboardWrite",
+    "storage"
+  ],
+  "action": {
+    "default_title": "Bunjang-Bestellungen für CardCargo synchronisieren",
+    "default_popup": "popup.html"
+  }
+}

@@ -1,15 +1,17 @@
 'use client'
 
+import { ArchivedImageDownloadEnhancer } from '@/components/archived-image-download-enhancer'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
 const links = [
   { href: '/', label: 'Übersicht', exact: true },
   { href: '/purchases', label: 'Einkäufe' },
-  { href: '/purchases/new', label: 'URL importieren', exact: true },
+  
   { href: '/warehouse-packages', label: 'OLAEET-Pakete' },
   { href: '/shipments', label: 'Sendungen' },
   { href: '/inventory', label: 'Inventar' },
+  { href: '/revenue', label: 'Umsatz' },
 ]
 
 function isActive(pathname: string, href: string, exact?: boolean) {
@@ -23,6 +25,7 @@ export function AppNavigation() {
 
   return (
     <nav className="main-nav" aria-label="Hauptnavigation">
+      <ArchivedImageDownloadEnhancer />
       {links.map((link) => (
         <Link
           href={link.href}

@@ -65,6 +65,8 @@ export interface PurchaseRow {
   price_amount: number | null
   price_currency: string
   domestic_shipping_amount: number | null
+  domestic_carrier?: string | null
+  domestic_tracking_number?: string | null
   service_fee_amount: number | null
   purchased_at: string | null
   status: PurchaseStatus

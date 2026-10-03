@@ -12,6 +12,7 @@ import { StatusBadge } from '@/components/status-badge'
 const purchaseStatuses = Object.keys(purchaseStatusLabels) as PurchaseStatus[]
 
 type PurchaseFilters = {
+  search: string
   status: PurchaseStatus | ''
   dateFrom: string
   dateTo: string
@@ -21,6 +22,7 @@ function purchaseUrl(page: number, sort: PurchaseSortKey, filters: PurchaseFilte
   const params = new URLSearchParams()
   if (page > 1) params.set('page', String(page))
   if (sort !== 'date_desc') params.set('sort', sort)
+  if (filters.search) params.set('q', filters.search)
   if (filters.status) params.set('status', filters.status)
   if (filters.dateFrom) params.set('dateFrom', filters.dateFrom)
   if (filters.dateTo) params.set('dateTo', filters.dateTo)
@@ -38,6 +40,7 @@ export function PurchaseListWorkspace({
   statusFilter,
   dateFrom,
   dateTo,
+  searchQuery,
 }: {
   purchases: PurchaseWithThumbnail[]
   page: number
@@ -48,6 +51,7 @@ export function PurchaseListWorkspace({
   statusFilter: PurchaseStatus | ''
   dateFrom: string
   dateTo: string
+  searchQuery: string
 }) {
   const router = useRouter()
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -58,12 +62,21 @@ export function PurchaseListWorkspace({
   const [purchasedAt, setPurchasedAt] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  const [filterSearch, setFilterSearch] = useState(searchQuery)
   const [filterStatus, setFilterStatus] = useState<PurchaseStatus | ''>(statusFilter)
   const [filterDateFrom, setFilterDateFrom] = useState(dateFrom)
   const [filterDateTo, setFilterDateTo] = useState(dateTo)
   const [filterMessage, setFilterMessage] = useState<string | null>(null)
-  const activeFilters: PurchaseFilters = { status: statusFilter, dateFrom, dateTo }
-  const hasActiveFilters = Boolean(statusFilter || dateFrom || dateTo)
+
+  const activeFilters: PurchaseFilters = {
+    search: searchQuery,
+    status: statusFilter,
+    dateFrom,
+    dateTo,
+  }
+  const hasActiveFilters = Boolean(
+    searchQuery || statusFilter || dateFrom || dateTo,
+  )
   const visibleIds = useMemo(() => purchases.map((purchase) => purchase.id), [purchases])
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.includes(id))
 
@@ -74,20 +87,31 @@ export function PurchaseListWorkspace({
     }
     setFilterMessage(null)
     setSelectedIds([])
-    router.push(purchaseUrl(1, sort, {
-      status: filterStatus,
-      dateFrom: filterDateFrom,
-      dateTo: filterDateTo,
-    }))
+    router.push(
+      purchaseUrl(1, sort, {
+        search: filterSearch.trim(),
+        status: filterStatus,
+        dateFrom: filterDateFrom,
+        dateTo: filterDateTo,
+      }),
+    )
   }
 
   function resetFilters() {
+    setFilterSearch('')
     setFilterStatus('')
     setFilterDateFrom('')
     setFilterDateTo('')
     setFilterMessage(null)
     setSelectedIds([])
-    router.push(purchaseUrl(1, sort, { status: '', dateFrom: '', dateTo: '' }))
+    router.push(
+      purchaseUrl(1, sort, {
+        search: '',
+        status: '',
+        dateFrom: '',
+        dateTo: '',
+      }),
+    )
   }
 
   function toggleAllVisible() {
@@ -152,6 +176,24 @@ export function PurchaseListWorkspace({
   return (
     <div className="purchase-workspace">
       <section className="purchase-filter-bar" aria-label="Einkäufe filtern">
+        <label
+          className="purchase-filter-control"
+          style={{ minWidth: 280 }}
+        >
+          <span>Suche</span>
+          <input
+            type="search"
+            value={filterSearch}
+            placeholder="Name, Einzelkarte oder Trackingnummer"
+            onChange={(event) => setFilterSearch(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                applyFilters()
+              }
+            }}
+          />
+        </label>
         <label className="purchase-filter-control">
           <span>Status</span>
           <select value={filterStatus} onChange={(event) => setFilterStatus(event.target.value as PurchaseStatus | '')}>
@@ -171,7 +213,13 @@ export function PurchaseListWorkspace({
         </label>
         <div className="purchase-filter-actions">
           <button className="button button-secondary" type="button" onClick={applyFilters}>Filter anwenden</button>
-          <button className="button button-ghost" type="button" onClick={resetFilters} disabled={!hasActiveFilters && !filterStatus && !filterDateFrom && !filterDateTo}>Zurücksetzen</button>
+          <button className="button button-ghost" type="button" onClick={resetFilters} disabled={
+            !hasActiveFilters &&
+            !filterSearch &&
+            !filterStatus &&
+            !filterDateFrom &&
+            !filterDateTo
+          }>Zurücksetzen</button>
         </div>
       </section>
 

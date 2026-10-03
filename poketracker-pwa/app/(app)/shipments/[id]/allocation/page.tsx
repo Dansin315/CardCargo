@@ -5,6 +5,7 @@ import { ShipmentCostAllocationForm } from '@/components/shipment-cost-allocatio
 import { requireUser } from '@/lib/auth'
 import { loadShipmentAllocationContext } from '@/lib/shipment-cost-allocation-queries'
 
+import { OlaeetShipmentRecordDetails } from '@/components/olaeet-shipment-record-details'
 export const metadata: Metadata = { title: 'Sendungskosten verteilen' }
 export const dynamic = 'force-dynamic'
 
@@ -34,6 +35,7 @@ export default async function ShipmentCostAllocationPage({
           </p>
         </div>
       </header>
+      <OlaeetShipmentRecordDetails />
 
       {!context.purchases.length ? (
         <section className="panel">
