@@ -1,0 +1,160 @@
+[1mdiff --git a/poketracker-pwa/lib/card-catalog-server.ts b/poketracker-pwa/lib/card-catalog-server.ts[m
+[1mindex 9531073..18705bf 100644[m
+[1m--- a/poketracker-pwa/lib/card-catalog-server.ts[m
+[1m+++ b/poketracker-pwa/lib/card-catalog-server.ts[m
+[36m@@ -620,14 +620,26 @@[m [masync function fetchTcgdexBriefs([m
+ async function resolveEnglishPokemonNames([m
+   dexId: number | null,[m
+   suffix: string | null | undefined,[m
+[31m-  cache: Map<number, { pokemonNameEn: string | null; englishName: string | null }>,[m
+[32m+[m[32m  cache: Map<string, { pokemonNameEn: string | null; englishName: string | null }>,[m
+ ) {[m
+   if (!dexId) return { pokemonNameEn: null, englishName: null }[m
+[31m-  const cached = cache.get(dexId)[m
+[32m+[m
+[32m+[m[32m  // The full English card name also depends on the suffix (ex, V, GX, ...),[m
+[32m+[m[32m  // so a dexId-only cache can leak a name from another card form.[m
+[32m+[m[32m  const cacheKey = `${dexId}:${normalizedText(suffix)}`[m
+[32m+[m[32m  const cached = cache.get(cacheKey)[m
+   if (cached) return cached[m
+ [m
+[32m+[m[32m  // PokeAPI is the authoritative fallback for the species identity. This keeps[m
+[32m+[m[32m  // pokemonNameEn stable even when an English TCGdex card lookup is incomplete.[m
+[32m+[m[32m  const speciesByDexId = await resolvePokemonSpeciesNames([dexId])[m
+[32m+[m[32m  const speciesEnglish = speciesByDexId.get(dexId)?.english?.trim() || null[m
+[32m+[m
+   try {[m
+[31m-    const params = new URLSearchParams({ dexId: String(dexId) })[m
+[32m+[m[32m    // IMPORTANT: TCGdex's default filter is a contains/lax filter. Without eq:[m
+[32m+[m[32m    // dexId=9 can also match values such as 89, which previously made[m
+[32m+[m[32m    // Blastoise (#9) resolve to Muk (#89). Always request strict equality.[m
+[32m+[m[32m    const params = new URLSearchParams({ dexId: `eq:${dexId}` })[m
+     const briefs = await fetchJson<TcgDexBrief[]>([m
+       `https://api.tcgdex.net/v2/en/cards?${params.toString()}`,[m
+       undefined,[m
+[36m@@ -635,15 +647,9 @@[m [masync function resolveEnglishPokemonNames([m
+     )[m
+ [m
+     const names = [...new Set(briefs.map((brief) => brief.name.trim()).filter(Boolean))][m
+[31m-    if (!names.length) {[m
+[31m-      const empty = { pokemonNameEn: null, englishName: null }[m
+[31m-      cache.set(dexId, empty)[m
+[31m-      return empty[m
+[31m-    }[m
+[31m-[m
+     const speciesCandidates = [...new Set(names.map(stripPokemonCardSuffix).filter(Boolean))][m
+       .sort((a, b) => a.length - b.length || a.localeCompare(b))[m
+[31m-    const pokemonNameEn = speciesCandidates[0] ?? null[m
+[32m+[m[32m    const pokemonNameEn = speciesEnglish ?? speciesCandidates[0] ?? null[m
+ [m
+     const wantedSuffix = normalizedText(suffix)[m
+     const matchingSuffixNames = wantedSuffix[m
+[36m@@ -651,22 +657,24 @@[m [masync function resolveEnglishPokemonNames([m
+           .filter((name) => normalizedText(name).endsWith(wantedSuffix))[m
+           .sort((a, b) => a.length - b.length || a.localeCompare(b))[m
+       : [][m
+[31m-[m
+     const englishName =[m
+       matchingSuffixNames[0] ??[m
+       (pokemonNameEn ? appendSuffix(pokemonNameEn, suffix) : null)[m
+ [m
+     const resolved = { pokemonNameEn, englishName }[m
+[31m-    cache.set(dexId, resolved)[m
+[32m+[m[32m    cache.set(cacheKey, resolved)[m
+     return resolved[m
+   } catch {[m
+[31m-    const empty = { pokemonNameEn: null, englishName: null }[m
+[31m-    cache.set(dexId, empty)[m
+[31m-    return empty[m
+[32m+[m[32m    // A failed TCGdex enrichment must not erase a species that PokeAPI already[m
+[32m+[m[32m    // resolved successfully (e.g. Japanese Mew -> Mew).[m
+[32m+[m[32m    const fallback = {[m
+[32m+[m[32m      pokemonNameEn: speciesEnglish,[m
+[32m+[m[32m      englishName: speciesEnglish ? appendSuffix(speciesEnglish, suffix) : null,[m
+[32m+[m[32m    }[m
+[32m+[m[32m    cache.set(cacheKey, fallback)[m
+[32m+[m[32m    return fallback[m
+   }[m
+ }[m
+[31m-[m
+[31m-[m
+ async function fetchTcgdexSet(language: string, setCode: string) {[m
+   return fetchJson<TcgDexSet>([m
+     `https://api.tcgdex.net/v2/${encodeURIComponent(language)}/sets/${encodeURIComponent(setCode)}`,[m
+[36m@@ -772,11 +780,13 @@[m [masync function searchTcgdexLanguage([m
+   let localizedSearchNames: string[] = [][m
+   let crossLanguageNameMode: CrossLanguageNamePlan['mode'] | null = null[m
+ [m
+[32m+[m[32m  let crossLanguageDexIds: number[] = [][m
+   if (crossLanguageEnglishName) {[m
+     const plan = await resolveCrossLanguageEnglishName(name)[m
+     localizedSearchNames = plan.localizedSearchNames[m
+     crossLanguageNameMode = plan.mode[m
+ [m
+[32m+[m[32m    crossLanguageDexIds = plan.dexIds[m
+     // Do not silently discard either the species or a card-name modifier.[m
+     // If we cannot produce a trustworthy Japanese name, let searchTcgdex()[m
+     // continue to the English TCGdex catalog instead.[m
+[36m@@ -847,7 +857,7 @@[m [masync function searchTcgdexLanguage([m
+   const enriched = await enrichTcgdexBriefs(language, matchedBriefs)[m
+ [m
+   const englishNameCache = new Map<[m
+[31m-    number,[m
+[32m+[m[32m    string,[m
+     { pokemonNameEn: string | null; englishName: string | null }[m
+   >()[m
+ [m
+[36m@@ -858,8 +868,11 @@[m [masync function searchTcgdexLanguage([m
+       const variants = detail ? variantLabels(detail.variants) : [][m
+       const setCodeValue =[m
+         detail?.set?.id ?? brief.id.split('-')[0] ?? null[m
+[31m-      const dexId = detail?.dexId?.[0] ?? null[m
+[31m-[m
+[32m+[m[32m      const detailDexId =[m
+[32m+[m[32m        detail?.dexId?.find((value) => Number.isInteger(value) && value > 0) ?? null[m
+[32m+[m[32m      const dexId =[m
+[32m+[m[32m        detailDexId ??[m
+[32m+[m[32m        (crossLanguageDexIds.length === 1 ? crossLanguageDexIds[0] : null)[m
+       let pokemonNameEn: string | null = null[m
+       let englishName: string | null = null[m
+ [m
+[36m@@ -869,7 +882,11 @@[m [masync function searchTcgdexLanguage([m
+           detail?.category === 'Pokemon'[m
+             ? stripPokemonCardSuffix(englishName)[m
+             : null[m
+[31m-      } else if (detail?.category === 'Pokemon' && dexId) {[m
+[32m+[m[32m      } else if ([m
+[32m+[m[32m        dexId &&[m
+[32m+[m[32m        (detail?.category === 'Pokemon' ||[m
+[32m+[m[32m          (crossLanguageEnglishName && crossLanguageDexIds.length === 1))[m
+[32m+[m[32m      ) {[m
+         const resolved = await resolveEnglishPokemonNames([m
+           dexId,[m
+           detail.suffix,[m
+[36m@@ -877,6 +894,17 @@[m [masync function searchTcgdexLanguage([m
+         )[m
+         pokemonNameEn = resolved.pokemonNameEn[m
+         englishName = resolved.englishName[m
+[32m+[m
+[32m+[m[32m        // When the search itself contained a supported English card-name[m
+[32m+[m[32m        // modifier (Shining, Radiant, ...), preserve that full English card[m
+[32m+[m[32m        // name while pokemonNameEn remains the bare species.[m
+[32m+[m[32m        if ([m
+[32m+[m[32m          crossLanguageNameMode === 'card-name' &&[m
+[32m+[m[32m          crossLanguageDexIds.length === 1 &&[m
+[32m+[m[32m          knownEnglishCardNameModifier(name)[m
+[32m+[m[32m        ) {[m
+[32m+[m[32m          englishName = appendSuffix(name, detail?.suffix)[m
+[32m+[m[32m        }[m
+       }[m
+ [m
+       const snapshot = detail[m
+[36m@@ -893,6 +921,8 @@[m [masync function searchTcgdexLanguage([m
+             hp: detail.hp ?? null,[m
+             types: detail.types ?? [],[m
+             dexId: detail.dexId ?? [],[m
+[32m+[m[32m            resolvedDexId: dexId,[m
+[32m+[m[32m            dexIdSource: detailDexId ? 'tcgdex' : dexId ? 'cross-language' : null,[m
+             suffix: detail.suffix ?? null,[m
+             variants,[m
+             setCode: setCodeValue,[m

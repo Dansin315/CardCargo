@@ -1,0 +1,311 @@
+--- a/components/warehouse-package-form.tsx
++++ b/components/warehouse-package-form.tsx
+@@ -4,9 +4,11 @@
+ import { useRouter } from 'next/navigation'
+ import { useState, type FormEvent } from 'react'
+ import {
++  addDaysToDate,
++  isValidDateOnly,
+   packageStatusLabels,
+   packageStatuses,
+-  toDateTimeLocal,
++  toDateInput,
+   type PackagePurchaseChoice,
+   type WarehousePackageRow,
+ } from '@/lib/warehouse-packages'
+@@ -30,11 +32,10 @@
+   return normalized || null
+ }
+ 
+-function dateTimeOrNull(value: FormDataEntryValue | null) {
++function dateOrNull(value: FormDataEntryValue | null) {
+   const normalized = String(value ?? '').trim()
+   if (!normalized) return null
+-  const date = new Date(normalized)
+-  return Number.isNaN(date.getTime()) ? 'invalid' : date.toISOString()
++  return isValidDateOnly(normalized) ? normalized : 'invalid'
+ }
+ 
+ export function WarehousePackageForm({
+@@ -46,6 +47,8 @@
+   const router = useRouter()
+   const [submitting, setSubmitting] = useState(false)
+   const [message, setMessage] = useState<string | null>(null)
++  const [arrivedAt, setArrivedAt] = useState(toDateInput(packageData?.arrived_at))
++  const storageDeadlineAt = addDaysToDate(arrivedAt, 80)
+ 
+   async function submit(event: FormEvent<HTMLFormElement>) {
+     event.preventDefault()
+@@ -65,13 +68,12 @@
+       }
+ 
+       const dateValues = {
+-        arrivedAt: dateTimeOrNull(form.get('arrivedAt')),
+-        inspectedAt: dateTimeOrNull(form.get('inspectedAt')),
+-        storageStartedAt: dateTimeOrNull(form.get('storageStartedAt')),
+-        storageDeadlineAt: dateTimeOrNull(form.get('storageDeadlineAt')),
++        arrivedAt: dateOrNull(form.get('arrivedAt')),
++        inspectedAt: dateOrNull(form.get('inspectedAt')),
++        storageStartedAt: dateOrNull(form.get('storageStartedAt')),
+       }
+       if (Object.values(dateValues).includes('invalid')) {
+-        throw new Error('Mindestens ein Datum oder eine Uhrzeit ist ungültig.')
++        throw new Error('Mindestens ein Datum ist ungültig.')
+       }
+ 
+       const purchaseIds = form.getAll('purchaseIds').map(String)
+@@ -214,7 +216,7 @@
+         <div className="panel-heading">
+           <div>
+             <h2>Eingang, Inspektion und Lagerung</h2>
+-            <p>Zeitpunkte sowie von OLAEET gemessene Paketdaten.</p>
++            <p>Kalendertage sowie von OLAEET gemessene Paketdaten.</p>
+           </div>
+         </div>
+         <div className="form-grid two-columns">
+@@ -222,33 +224,38 @@
+             Eingang bei OLAEET
+             <input
+               name="arrivedAt"
+-              type="datetime-local"
+-              defaultValue={toDateTimeLocal(packageData?.arrived_at)}
++              type="date"
++              value={arrivedAt}
++              onChange={(event) => setArrivedAt(event.target.value)}
+             />
+           </label>
+           <label>
+-            Inspektionszeitpunkt
++            Inspektionsdatum
+             <input
+               name="inspectedAt"
+-              type="datetime-local"
+-              defaultValue={toDateTimeLocal(packageData?.inspected_at)}
++              type="date"
++              defaultValue={toDateInput(packageData?.inspected_at)}
+             />
+           </label>
+           <label>
+             Lagerbeginn
+             <input
+               name="storageStartedAt"
+-              type="datetime-local"
+-              defaultValue={toDateTimeLocal(packageData?.storage_started_at)}
++              type="date"
++              defaultValue={toDateInput(packageData?.storage_started_at)}
+             />
+           </label>
+           <label>
+             Lagerfrist
+             <input
+-              name="storageDeadlineAt"
+-              type="datetime-local"
+-              defaultValue={toDateTimeLocal(packageData?.storage_deadline_at)}
+-            />
++              type="date"
++              value={storageDeadlineAt}
++              readOnly
++              aria-describedby="storage-deadline-help"
++            />
++            <small id="storage-deadline-help">
++              Automatisch: 80 Kalendertage nach dem Eingang bei OLAEET.
++            </small>
+           </label>
+           <label>
+             Gewicht in Gramm
+--- a/lib/warehouse-packages.ts
++++ b/lib/warehouse-packages.ts
+@@ -61,10 +61,30 @@
+   status: string
+ }
+ 
+-export function toDateTimeLocal(value: string | null | undefined) {
++export function isValidDateOnly(value: string) {
++  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
++  const [year, month, day] = value.split('-').map(Number)
++  const date = new Date(Date.UTC(year, month - 1, day))
++  return (
++    date.getUTCFullYear() === year &&
++    date.getUTCMonth() === month - 1 &&
++    date.getUTCDate() === day
++  )
++}
++
++export function addDaysToDate(value: string | null | undefined, days: number) {
++  if (!value || !isValidDateOnly(value) || !Number.isInteger(days)) return ''
++  const [year, month, day] = value.split('-').map(Number)
++  const date = new Date(Date.UTC(year, month - 1, day))
++  date.setUTCDate(date.getUTCDate() + days)
++  return date.toISOString().slice(0, 10)
++}
++
++export function toDateInput(value: string | null | undefined) {
+   if (!value) return ''
++  if (isValidDateOnly(value)) return value
+   const date = new Date(value)
+   if (Number.isNaN(date.getTime())) return ''
+   const offset = date.getTimezoneOffset() * 60_000
+-  return new Date(date.getTime() - offset).toISOString().slice(0, 16)
++  return new Date(date.getTime() - offset).toISOString().slice(0, 10)
+ }
+--- a/lib/warehouse-package-schema.ts
++++ b/lib/warehouse-package-schema.ts
+@@ -1,5 +1,5 @@
+ import { z } from 'zod'
+-import { packageStatuses } from '@/lib/warehouse-packages'
++import { addDaysToDate, isValidDateOnly, packageStatuses } from '@/lib/warehouse-packages'
+ 
+ const nullableText = (maxLength: number) =>
+   z
+@@ -19,17 +19,18 @@
+     .nullable()
+     .default(null)
+ 
+-const nullableDateTime = z
++const nullableDate = z
+   .string()
+   .trim()
+   .nullable()
+   .default(null)
+   .refine(
+-    (value) => value === null || value === '' || !Number.isNaN(Date.parse(value)),
+-    'Datum oder Uhrzeit ist ungültig.',
++    (value) => value === null || value === '' || isValidDateOnly(value),
++    'Datum ist ungültig.',
+   )
+   .transform((value) => value || null)
+ 
++
+ export const warehousePackageInputSchema = z
+   .object({
+     externalPackageId: nullableText(200),
+@@ -40,10 +41,9 @@
+     packageDescription: nullableText(2_000),
+     providerStatus: nullableText(200),
+     status: z.enum(packageStatuses),
+-    arrivedAt: nullableDateTime,
+-    inspectedAt: nullableDateTime,
+-    storageStartedAt: nullableDateTime,
+-    storageDeadlineAt: nullableDateTime,
++    arrivedAt: nullableDate,
++    inspectedAt: nullableDate,
++    storageStartedAt: nullableDate,
+     weightGrams: nullableAmount('Gewicht', 1_000_000),
+     lengthCm: nullableAmount('Länge', 10_000),
+     widthCm: nullableAmount('Breite', 10_000),
+@@ -60,17 +60,22 @@
+       })
+     }
+ 
++    const storageDeadlineAt = addDaysToDate(value.arrivedAt, 80)
+     if (
+       value.storageStartedAt &&
+-      value.storageDeadlineAt &&
+-      Date.parse(value.storageDeadlineAt) < Date.parse(value.storageStartedAt)
++      storageDeadlineAt &&
++      storageDeadlineAt < value.storageStartedAt
+     ) {
+       context.addIssue({
+         code: 'custom',
+-        path: ['storageDeadlineAt'],
+-        message: 'Die Lagerfrist darf nicht vor dem Lagerbeginn liegen.',
++        path: ['storageStartedAt'],
++        message: 'Der Lagerbeginn darf nicht nach der automatisch berechneten Lagerfrist liegen.',
+       })
+     }
+   })
++  .transform((value) => ({
++    ...value,
++    storageDeadlineAt: addDaysToDate(value.arrivedAt, 80) || null,
++  }))
+ 
+ export type WarehousePackageInput = z.infer<typeof warehousePackageInputSchema>
+--- a/tests/warehouse-package-schema.test.ts
++++ b/tests/warehouse-package-schema.test.ts
+@@ -10,10 +10,9 @@
+   packageDescription: 'Pokemon cards',
+   providerStatus: 'Arrived',
+   status: 'received',
+-  arrivedAt: '2026-08-05T10:00:00.000Z',
++  arrivedAt: '2026-08-05',
+   inspectedAt: null,
+   storageStartedAt: null,
+-  storageDeadlineAt: null,
+   weightGrams: 250,
+   lengthCm: 20,
+   widthCm: 15,
+@@ -48,12 +47,27 @@
+     expect(result.success).toBe(false)
+   })
+ 
+-  it('rejects a storage deadline before storage start', () => {
++  it('calculates the storage deadline 80 days after arrival', () => {
++    expect(warehousePackageInputSchema.parse(validInput)).toMatchObject({
++      arrivedAt: '2026-08-05',
++      storageDeadlineAt: '2026-10-24',
++    })
++  })
++
++  it('rejects timestamps because package events are date-only', () => {
+     const result = warehousePackageInputSchema.safeParse({
+       ...validInput,
+-      storageStartedAt: '2026-08-10T10:00:00.000Z',
+-      storageDeadlineAt: '2026-08-09T10:00:00.000Z',
++      arrivedAt: '2026-08-05T10:00:00.000Z',
+     })
+     expect(result.success).toBe(false)
+   })
++
++  it('ignores a submitted deadline and recalculates it from arrival', () => {
++    expect(
++      warehousePackageInputSchema.parse({
++        ...validInput,
++        storageDeadlineAt: '2099-01-01',
++      }),
++    ).toMatchObject({ storageDeadlineAt: '2026-10-24' })
++  })
+ })
+--- /dev/null
++++ b/supabase/migrations/0003_olaeet_date_only_deadline.sql
+@@ -0,0 +1,41 @@
++-- OLAEET package dates are entered as calendar dates in CardCargo.
++-- Keep the existing timestamptz columns for backwards compatibility, but
++-- enforce the storage deadline as exactly 80 days after arrival.
++
++create or replace function public.set_warehouse_package_storage_deadline()
++returns trigger
++language plpgsql
++set search_path = ''
++as $$
++begin
++  if new.arrived_at is null then
++    new.storage_deadline_at := null;
++  else
++    new.storage_deadline_at := new.arrived_at + interval '80 days';
++  end if;
++
++  return new;
++end;
++$$;
++
++drop trigger if exists warehouse_packages_storage_deadline_trigger
++on public.warehouse_packages;
++
++create trigger warehouse_packages_storage_deadline_trigger
++before insert or update of arrived_at
++on public.warehouse_packages
++for each row
++execute function public.set_warehouse_package_storage_deadline();
++
++-- Backfill packages already stored before this rule was introduced.
++update public.warehouse_packages
++set storage_deadline_at = arrived_at + interval '80 days'
++where arrived_at is not null
++  and storage_deadline_at is distinct from arrived_at + interval '80 days';
++
++update public.warehouse_packages
++set storage_deadline_at = null
++where arrived_at is null
++  and storage_deadline_at is not null;
++
++notify pgrst, 'reload schema';

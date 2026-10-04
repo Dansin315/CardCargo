@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "CardCargo Bunjang Order Extractor",
+  "version": "2.0.0",
+  "description": "Lädt Bunjang-Bestelldetails aus der Kaufübersicht und exportiert sie für CardCargo.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "clipboardWrite"
+  ],
+  "action": {
+    "default_title": "Bunjang-Bestellungen für CardCargo scannen",
+    "default_popup": "popup.html"
+  }
+}

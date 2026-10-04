@@ -1,0 +1,168 @@
+/* CardCargo v102 - Umsatz workspace */
+.cc102-revenue-page { gap: 18px; }
+.cc102-page-header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 24px;
+}
+.cc102-page-header h1 { margin: 2px 0 6px; }
+.cc102-page-header p { margin: 0; color: var(--muted, #68716c); }
+.cc102-shipment-picker {
+  display: grid;
+  gap: 6px;
+  min-width: min(380px, 100%);
+  margin: 0;
+}
+.cc102-shipment-picker > span {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--muted, #68716c);
+}
+.cc102-shipment-picker select {
+  height: 38px;
+  min-width: 320px;
+  border: 1px solid var(--border, #dfe4e1);
+  border-radius: 9px;
+  background: var(--surface, #fff);
+  padding: 0 36px 0 11px;
+  font: inherit;
+  font-size: 14px;
+}
+.cc102-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+.cc102-metric-card {
+  min-width: 0;
+  border: 1px solid var(--border, #dfe4e1);
+  border-radius: 11px;
+  background: var(--surface, #fff);
+  padding: 14px 16px;
+  display: grid;
+  gap: 3px;
+}
+.cc102-metric-card > span:first-child {
+  color: var(--muted, #68716c);
+  font-size: 12px;
+  font-weight: 650;
+}
+.cc102-metric-card strong {
+  font-size: 20px;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+.cc102-metric-card > span:not(:first-child) {
+  font-size: 13px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.cc102-metric-card small { color: var(--muted, #77807b); font-size: 11px; }
+.cc102-fx-card strong { font-size: 16px; }
+.cc102-sheet-panel { padding: 0; overflow: hidden; }
+.cc102-sheet-heading { padding: 16px 18px 12px; margin: 0; }
+.cc102-sheet-scroll { overflow: auto; border-top: 1px solid var(--border, #e2e6e3); }
+.cc102-sheet {
+  width: 100%;
+  min-width: 980px;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+  font-size: 13px;
+}
+.cc102-sheet th,
+.cc102-sheet td {
+  border-right: 1px solid var(--border, #e2e6e3);
+  border-bottom: 1px solid var(--border, #e2e6e3);
+  padding: 7px 9px;
+  vertical-align: middle;
+  font-variant-numeric: tabular-nums;
+}
+.cc102-sheet th:last-child,
+.cc102-sheet td:last-child { border-right: 0; }
+.cc102-sheet tbody tr:last-child td { border-bottom: 0; }
+.cc102-sheet thead th {
+  background: #f5f7f5;
+  color: #525c56;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: .025em;
+}
+.cc102-sheet thead tr:first-child th { padding-top: 9px; padding-bottom: 5px; }
+.cc102-sheet thead tr:last-child th { padding-top: 4px; padding-bottom: 8px; color: #78817c; }
+.cc102-sheet thead th:first-child {
+  width: 34%;
+  text-align: left;
+  position: sticky;
+  left: 0;
+  z-index: 3;
+}
+.cc102-sheet th:not(:first-child) { width: 11%; }
+.cc102-order-row td {
+  background: #f7f9f7;
+  font-weight: 700;
+}
+.cc102-order-row td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: #f7f9f7;
+}
+.cc102-order-row td:not(:first-child) { text-align: right; }
+.cc102-order-row small,
+.cc102-card-row small {
+  display: block;
+  margin-top: 2px;
+  color: #7a837e;
+  font-size: 10.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cc102-card-row td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--surface, #fff);
+  padding-left: 28px;
+}
+.cc102-card-row:hover td { background: #fbfcfb; }
+.cc102-card-row:hover td:first-child { background: #fbfcfb; }
+.cc102-card-name { font-weight: 600; }
+.cc102-muted-cell { text-align: center; color: #a1aaa4; }
+.cc102-edit-cell { padding: 0 !important; background: var(--surface, #fff); }
+.cc102-edit-cell input {
+  width: 100%;
+  height: 39px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0 9px;
+  text-align: right;
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  outline: none;
+}
+.cc102-edit-cell input:hover { background: #f7faf8; }
+.cc102-edit-cell input:focus {
+  background: #fff;
+  box-shadow: inset 0 0 0 2px #2d7651;
+  position: relative;
+  z-index: 2;
+}
+.cc102-edit-cell input:disabled { cursor: not-allowed; color: #a1aaa4; background: #f7f7f7; }
+.cc102-loading { color: var(--muted, #68716c); }
+@media (max-width: 1050px) {
+  .cc102-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .cc102-page-header { align-items: stretch; flex-direction: column; }
+  .cc102-shipment-picker select { min-width: 0; width: 100%; }
+  .cc102-metrics { grid-template-columns: 1fr; }
+}

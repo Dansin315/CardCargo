@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>CardCargo Bunjang</title>
+    <style>
+      body { font: 14px system-ui, sans-serif; width: 330px; padding: 16px; margin: 0; }
+      h1 { font-size: 17px; margin: 0 0 8px; }
+      p { line-height: 1.4; }
+      button { width: 100%; padding: 11px 12px; cursor: pointer; font-weight: 650; }
+      #status { margin-top: 11px; min-height: 36px; line-height: 1.35; }
+      .muted { opacity: .72; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <h1>CardCargo Bunjang Extractor</h1>
+    <p>Öffne deine Bunjang-Käufe oder eine Bestelldetailseite. Der Extractor sammelt Produktlinks und den jeweils umgebenden Bestell-/Versandkontext.</p>
+    <button id="copy" type="button">Bunjang-Daten kopieren</button>
+    <div id="status" role="status"></div>
+    <p class="muted">Keine Cookies, Passwörter oder Login-Tokens werden exportiert.</p>
+    <script src="popup.js"></script>
+  </body>
+</html>

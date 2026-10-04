@@ -1,0 +1,395 @@
+import { revalidatePath } from 'next/cache'
+import { NextResponse } from 'next/server'
+import { z } from 'zod'
+import { getApiUser } from '@/lib/auth'
+import { normalizeDomesticTrackingNumber } from '@/lib/domestic-tracking'
+import { hasTrustedRequestOrigin } from '@/lib/request-security'
+
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+export const maxDuration = 60
+
+const nullableText = (max: number) =>
+  z.string().trim().max(max).nullable().default(null).transform((value) => value || null)
+
+const recordSchema = z.object({
+  orderId: z.string().trim().min(1).max(100),
+  orderUrl: z.string().url().max(2_000),
+  sourceListingId: nullableText(200),
+  title: nullableText(1_000),
+  sellerName: nullableText(300),
+  purchasedAt: nullableText(30),
+  productAmount: z.number().finite().min(0).nullable(),
+  domesticShippingAmount: z.number().finite().min(0).nullable(),
+  totalAmount: z.number().finite().min(0).nullable(),
+  domesticCarrier: nullableText(120),
+  domesticTrackingNumber: nullableText(200),
+  transactionMethod: nullableText(200),
+  bunjangStatus: nullableText(100),
+  imageUrls: z.array(z.string().url()).max(12),
+  rawText: z.string().max(30_000),
+  warnings: z.array(z.string().max(500)).max(20),
+})
+
+const inputSchema = z.object({
+  records: z.array(recordSchema).min(1).max(200),
+  createMissing: z.boolean().default(false),
+  autoAssignOlaeet: z.boolean().default(true),
+})
+
+type Purchase = {
+  id: string
+  bunjang_order_id: string | null
+  source_listing_id: string | null
+  title: string
+  seller_name: string | null
+  price_amount: number | null
+  purchased_at: string | null
+  status: string
+  domestic_shipping_amount: number | null
+  domestic_carrier: string | null
+  domestic_tracking_number: string | null
+  raw_metadata: unknown
+}
+
+function normalized(value: string | null | undefined) {
+  return String(value ?? '')
+    .normalize('NFKC')
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '')
+}
+
+function dateDistanceDays(left: string | null, right: string | null) {
+  if (!left || !right) return Number.POSITIVE_INFINITY
+  const a = new Date(`${left.slice(0, 10)}T00:00:00Z`).getTime()
+  const b = new Date(`${right.slice(0, 10)}T00:00:00Z`).getTime()
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return Number.POSITIVE_INFINITY
+  return Math.abs(a - b) / 86_400_000
+}
+
+function heuristicScore(purchase: Purchase, record: z.infer<typeof recordSchema>) {
+  let score = 0
+  if (record.title && normalized(purchase.title) === normalized(record.title)) score += 5
+  if (
+    record.sellerName &&
+    purchase.seller_name &&
+    normalized(purchase.seller_name) === normalized(record.sellerName)
+  ) score += 3
+  if (
+    record.productAmount !== null &&
+    purchase.price_amount !== null &&
+    Number(purchase.price_amount) === Number(record.productAmount)
+  ) score += 3
+  if (dateDistanceDays(purchase.purchased_at, record.purchasedAt) <= 3) score += 1
+  return score
+}
+
+function metadata(existing: unknown, record: z.infer<typeof recordSchema>) {
+  const current =
+    existing && typeof existing === 'object' && !Array.isArray(existing)
+      ? (existing as Record<string, unknown>)
+      : {}
+
+  return {
+    ...current,
+    bunjang_order: {
+      synced_at: new Date().toISOString(),
+      order_id: record.orderId,
+      order_url: record.orderUrl,
+      bunjang_status: record.bunjangStatus,
+      transaction_method: record.transactionMethod,
+      total_amount: record.totalAmount,
+      image_urls: record.imageUrls,
+      parser_warnings: record.warnings,
+    },
+  }
+}
+
+export async function POST(request: Request) {
+  if (!hasTrustedRequestOrigin(request)) {
+    return NextResponse.json({ error: 'Anfrage von fremder Origin blockiert.' }, { status: 403 })
+  }
+
+  const auth = await getApiUser()
+  if (!auth.user) return NextResponse.json({ error: auth.error }, { status: auth.status })
+
+  try {
+    const input = inputSchema.parse(await request.json())
+
+    const [
+      { data: purchaseData, error: purchaseError },
+      { data: packageData, error: packageError },
+      { data: linksData, error: linksError },
+    ] = await Promise.all([
+      auth.supabase
+        .from('purchases')
+        .select(
+          'id, bunjang_order_id, source_listing_id, title, seller_name, price_amount, purchased_at, status, domestic_shipping_amount, domestic_carrier, domestic_tracking_number, raw_metadata',
+        )
+        .eq('user_id', auth.user.id)
+        .eq('source', 'bunjang'),
+      auth.supabase
+        .from('warehouse_packages')
+        .select('id, external_package_id, domestic_tracking_number')
+        .eq('user_id', auth.user.id)
+        .eq('provider', 'OLAEET'),
+      auth.supabase
+        .from('warehouse_package_purchases')
+        .select('purchase_id, warehouse_package_id')
+        .eq('user_id', auth.user.id),
+    ])
+
+    if (purchaseError) throw new Error(purchaseError.message)
+    if (packageError) throw new Error(packageError.message)
+    if (linksError) throw new Error(linksError.message)
+
+    const purchases = (purchaseData ?? []) as Purchase[]
+    const byOrder = new Map(
+      purchases.filter((p) => p.bunjang_order_id).map((p) => [p.bunjang_order_id!, p]),
+    )
+    const byListing = new Map(
+      purchases.filter((p) => p.source_listing_id).map((p) => [p.source_listing_id!, p]),
+    )
+
+    const packagesByTracking = new Map<
+      string,
+      Array<{ id: string; external_package_id: string | null }>
+    >()
+    for (const pkg of packageData ?? []) {
+      const key = normalizeDomesticTrackingNumber(pkg.domestic_tracking_number)
+      if (!key) continue
+      packagesByTracking.set(key, [
+        ...(packagesByTracking.get(key) ?? []),
+        { id: pkg.id, external_package_id: pkg.external_package_id },
+      ])
+    }
+
+    const linkedByPurchase = new Map<string, string>()
+    const purchaseIdsByPackage = new Map<string, string[]>()
+    for (const link of linksData ?? []) {
+      linkedByPurchase.set(link.purchase_id, link.warehouse_package_id)
+      purchaseIdsByPackage.set(link.warehouse_package_id, [
+        ...(purchaseIdsByPackage.get(link.warehouse_package_id) ?? []),
+        link.purchase_id,
+      ])
+    }
+
+    const results = []
+
+    for (const record of input.records) {
+      let purchase = byOrder.get(record.orderId) ?? null
+      let matchMethod = purchase ? 'order_id' : null
+
+      if (!purchase && record.sourceListingId) {
+        purchase = byListing.get(record.sourceListingId) ?? null
+        if (purchase) matchMethod = 'listing_id'
+      }
+
+      if (!purchase) {
+        const scored = purchases
+          .map((candidate) => ({
+            purchase: candidate,
+            score: heuristicScore(candidate, record),
+          }))
+          .filter((item) => item.score >= 8)
+          .sort((a, b) => b.score - a.score)
+
+        if (scored.length === 1 || (scored[0] && scored[0].score > (scored[1]?.score ?? -1))) {
+          purchase = scored[0]?.purchase ?? null
+          if (purchase) matchMethod = 'title_seller_price'
+        } else if (scored.length > 1) {
+          results.push({
+            orderId: record.orderId,
+            title: record.title,
+            action: 'conflict',
+            purchaseId: null,
+            matchMethod: 'ambiguous',
+            trackingNumber: record.domesticTrackingNumber,
+            olaeetExternalId: null,
+            message: 'Mehrere bestehende CardCargo-Einkäufe passen zu dieser Bunjang-Bestellung.',
+          })
+          continue
+        }
+      }
+
+      if (!purchase && !input.createMissing) {
+        results.push({
+          orderId: record.orderId,
+          title: record.title,
+          action: 'skipped',
+          purchaseId: null,
+          matchMethod: 'none',
+          trackingNumber: record.domesticTrackingNumber,
+          olaeetExternalId: null,
+          message: 'Kein eindeutiger bestehender Einkauf gefunden.',
+        })
+        continue
+      }
+
+      if (!purchase) {
+        const { data, error } = await auth.supabase
+          .from('purchases')
+          .insert({
+            user_id: auth.user.id,
+            source: 'bunjang',
+            bunjang_order_id: record.orderId,
+            source_listing_id: record.sourceListingId,
+            listing_url: record.orderUrl,
+            canonical_url: record.orderUrl,
+            title: record.title || `Bunjang Bestellung #${record.orderId}`,
+            seller_name: record.sellerName,
+            price_amount: record.productAmount,
+            price_currency: 'KRW',
+            domestic_shipping_amount: record.domesticShippingAmount,
+            service_fee_amount: null,
+            purchased_at: record.purchasedAt,
+            status: record.domesticTrackingNumber ? 'shipped_domestic' : 'ordered',
+            domestic_carrier: record.domesticCarrier,
+            domestic_tracking_number: record.domesticTrackingNumber,
+            raw_metadata: metadata(null, record),
+          })
+          .select(
+            'id, bunjang_order_id, source_listing_id, title, seller_name, price_amount, purchased_at, status, domestic_shipping_amount, domestic_carrier, domestic_tracking_number, raw_metadata',
+          )
+          .single()
+
+        if (error) throw new Error(error.message)
+        purchase = data as Purchase
+        purchases.push(purchase)
+        byOrder.set(record.orderId, purchase)
+        matchMethod = 'created'
+      } else {
+        let nextStatus = purchase.status
+        if (
+          record.bunjangStatus === '거래 취소 완료' &&
+          !['warehouse_received', 'consolidated', 'international_transit', 'delivered'].includes(
+            purchase.status,
+          )
+        ) {
+          nextStatus = 'cancelled'
+        } else if (
+          record.domesticTrackingNumber &&
+          ['planned', 'ordered', 'paid'].includes(purchase.status)
+        ) {
+          nextStatus = 'shipped_domestic'
+        }
+
+        const { data, error } = await auth.supabase
+          .from('purchases')
+          .update({
+            bunjang_order_id: record.orderId,
+            source_listing_id: purchase.source_listing_id || record.sourceListingId,
+            seller_name: purchase.seller_name || record.sellerName,
+            price_amount: purchase.price_amount ?? record.productAmount,
+            purchased_at: purchase.purchased_at || record.purchasedAt,
+            domestic_shipping_amount:
+              purchase.domestic_shipping_amount ?? record.domesticShippingAmount,
+            domestic_carrier: record.domesticCarrier || purchase.domestic_carrier,
+            domestic_tracking_number:
+              record.domesticTrackingNumber || purchase.domestic_tracking_number,
+            status: nextStatus,
+            raw_metadata: metadata(purchase.raw_metadata, record),
+          })
+          .eq('id', purchase.id)
+          .eq('user_id', auth.user.id)
+          .select(
+            'id, bunjang_order_id, source_listing_id, title, seller_name, price_amount, purchased_at, status, domestic_shipping_amount, domestic_carrier, domestic_tracking_number, raw_metadata',
+          )
+          .single()
+
+        if (error) throw new Error(error.message)
+        purchase = data as Purchase
+        byOrder.set(record.orderId, purchase)
+      }
+
+      const tracking =
+        record.domesticTrackingNumber || purchase.domestic_tracking_number
+      const key = normalizeDomesticTrackingNumber(tracking)
+      const packageMatches = key ? packagesByTracking.get(key) ?? [] : []
+
+      let olaeetExternalId: string | null = null
+      let message = `Bunjang-Bestellung über ${matchMethod} mit CardCargo verknüpft.`
+
+      if (input.autoAssignOlaeet && key && packageMatches.length === 1) {
+        const pkg = packageMatches[0]
+        olaeetExternalId = pkg.external_package_id
+        const currentPackage = linkedByPurchase.get(purchase.id)
+
+        if (currentPackage && currentPackage !== pkg.id) {
+          results.push({
+            orderId: record.orderId,
+            title: purchase.title,
+            action: 'conflict',
+            purchaseId: purchase.id,
+            matchMethod,
+            trackingNumber: tracking,
+            olaeetExternalId,
+            message: 'Tracking passt, aber der Einkauf ist bereits einem anderen OLAEET-Paket zugeordnet.',
+          })
+          continue
+        }
+
+        const ids = [
+          ...new Set([...(purchaseIdsByPackage.get(pkg.id) ?? []), purchase.id]),
+        ]
+        const { error: assignError } = await auth.supabase.rpc(
+          'replace_warehouse_package_purchases',
+          { p_package_id: pkg.id, p_purchase_ids: ids },
+        )
+        if (assignError) throw new Error(assignError.message)
+
+        purchaseIdsByPackage.set(pkg.id, ids)
+        linkedByPurchase.set(purchase.id, pkg.id)
+
+        if (['planned', 'ordered', 'paid', 'shipped_domestic'].includes(purchase.status)) {
+          const { error: statusError } = await auth.supabase
+            .from('purchases')
+            .update({ status: 'warehouse_received' })
+            .eq('id', purchase.id)
+            .eq('user_id', auth.user.id)
+          if (statusError) throw new Error(statusError.message)
+        }
+
+        message = `Exakte Tracking-Übereinstimmung mit ${pkg.external_package_id || 'OLAEET-Paket'}; automatisch zugeordnet.`
+      } else if (input.autoAssignOlaeet && packageMatches.length > 1) {
+        message = 'Bunjang-Daten gespeichert, aber mehrere OLAEET-Pakete besitzen dieselbe Trackingnummer.'
+      } else if (key && !packageMatches.length) {
+        message = 'Tracking gespeichert; passendes OLAEET-Paket ist noch nicht importiert.'
+      }
+
+      results.push({
+        orderId: record.orderId,
+        title: purchase.title,
+        action: matchMethod === 'created' ? 'created' : 'updated',
+        purchaseId: purchase.id,
+        matchMethod,
+        trackingNumber: tracking,
+        olaeetExternalId,
+        message,
+      })
+    }
+
+    revalidatePath('/purchases')
+    revalidatePath('/warehouse-packages')
+
+    return NextResponse.json({
+      summary: {
+        total: results.length,
+        updated: results.filter((r) => r.action === 'updated').length,
+        created: results.filter((r) => r.action === 'created').length,
+        skipped: results.filter((r) => r.action === 'skipped').length,
+        conflicts: results.filter((r) => r.action === 'conflict').length,
+        olaeetMatches: results.filter((r) => Boolean(r.olaeetExternalId) && r.action !== 'conflict').length,
+      },
+      orders: results,
+    })
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return NextResponse.json({ error: error.issues[0]?.message || 'Ungültige Importdaten.' }, { status: 422 })
+    }
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Bunjang-Sync fehlgeschlagen.' },
+      { status: 400 },
+    )
+  }
+}

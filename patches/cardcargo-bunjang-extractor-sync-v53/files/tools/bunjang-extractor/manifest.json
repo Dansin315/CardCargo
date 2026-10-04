@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "CardCargo Bunjang Extractor",
+  "version": "1.0.0",
+  "description": "Extrahiert Bunjang-Kauf- und Versanddaten für CardCargo.",
+  "permissions": ["activeTab", "scripting", "clipboardWrite"],
+  "action": {
+    "default_title": "Bunjang-Daten für CardCargo extrahieren",
+    "default_popup": "popup.html"
+  }
+}

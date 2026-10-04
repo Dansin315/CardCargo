@@ -1,0 +1,262 @@
+/* CardCargo v98 - shipment total costs and customs */
+
+.cc98-header-summary {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.cc98-cost-section {
+  display: grid;
+  gap: 14px;
+}
+
+.cc98-cost-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.cc98-cost-heading h3,
+.cc98-cost-heading p {
+  margin: 0;
+}
+
+.cc98-cost-heading p {
+  margin-top: 4px;
+  color: var(--cc93-muted, #667085);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.cc98-order-count {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border: 1px solid var(--cc93-border, #e3e7ec);
+  border-radius: 7px;
+  background: var(--cc93-surface-muted, #f9fafb);
+  color: var(--cc93-muted, #667085);
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.cc98-cost-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.cc98-cost-card {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--cc93-border, #e3e7ec);
+  border-radius: 9px;
+  background: var(--cc93-surface, #fff);
+}
+
+.cc98-cost-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--cc93-border, #e3e7ec);
+  background: var(--cc93-surface-muted, #f9fafb);
+}
+
+.cc98-cost-card-head span {
+  color: var(--cc93-muted, #667085);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+.cc98-cost-card-head strong {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cc98-cost-card dl {
+  margin: 0;
+  padding: 5px 12px 8px;
+}
+
+.cc98-cost-card dl > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: baseline;
+  padding: 6px 0;
+}
+
+.cc98-cost-card dt,
+.cc98-cost-card dd {
+  margin: 0;
+  font-size: 11.5px;
+}
+
+.cc98-cost-card dt {
+  color: var(--cc93-muted, #667085);
+  font-weight: 500;
+}
+
+.cc98-cost-card dd {
+  color: var(--cc93-text, #20262e);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cc98-cost-card .cc98-cost-subtotal {
+  margin-top: 2px;
+  padding-top: 8px;
+  border-top: 1px solid var(--cc93-border, #e3e7ec);
+}
+
+.cc98-cost-card .cc98-cost-subtotal dt,
+.cc98-cost-card .cc98-cost-subtotal dd {
+  color: var(--cc93-text, #20262e);
+  font-weight: 700;
+}
+
+.cc98-grand-costs {
+  overflow: hidden;
+  border: 1px solid #cadfce;
+  border-radius: 10px;
+  background: var(--cc93-accent-soft, #edf5ef);
+}
+
+.cc98-grand-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 11px 13px;
+  border-bottom: 1px solid rgba(49, 93, 61, 0.14);
+}
+
+.cc98-grand-row span {
+  color: #526459;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.cc98-grand-row strong {
+  color: var(--cc93-text, #20262e);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.cc98-grand-row-total {
+  border-bottom: 0;
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.cc98-grand-row-total span,
+.cc98-grand-row-total strong {
+  font-weight: 750;
+}
+
+.cc98-grand-row-total strong {
+  color: var(--cc93-accent, #315d3d);
+  font-size: 15px;
+}
+
+.cc98-customs-editor {
+  display: grid;
+  gap: 4px;
+  padding: 10px 13px;
+  border-bottom: 1px solid rgba(49, 93, 61, 0.14);
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.cc98-customs-editor label {
+  display: block;
+  margin: 0 0 5px;
+  color: #526459;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.cc98-customs-controls {
+  display: grid;
+  grid-template-columns: minmax(110px, 1fr) 78px auto;
+  gap: 7px;
+  align-items: center;
+}
+
+.cc98-customs-controls input,
+.cc98-customs-controls select {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 0 9px;
+  border: 1px solid var(--cc93-border-strong, #d0d5dd);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--cc93-text, #20262e);
+  font: inherit;
+  font-size: 12px;
+}
+
+.cc98-customs-controls input:focus,
+.cc98-customs-controls select:focus {
+  border-color: #8dae96;
+  outline: 2px solid rgba(49, 93, 61, 0.12);
+  outline-offset: 0;
+}
+
+.cc98-customs-message {
+  color: var(--cc93-muted, #667085);
+  font-size: 10.5px;
+}
+
+.cc98-cost-note {
+  margin: 0;
+  padding: 0 13px 11px;
+  color: #66756b;
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.cc98-currency-warning {
+  margin: 0;
+  font-size: 11px;
+}
+
+@media (max-width: 800px) {
+  .cc98-header-summary,
+  .cc98-cost-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .cc98-cost-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .cc98-order-count {
+    width: fit-content;
+    white-space: normal;
+  }
+
+  .cc98-customs-controls {
+    grid-template-columns: minmax(0, 1fr) 72px;
+  }
+
+  .cc98-customs-controls .button {
+    grid-column: 1 / -1;
+  }
+
+  .cc98-grand-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .cc98-grand-row strong {
+    text-align: left;
+  }
+}

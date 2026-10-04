@@ -1,0 +1,329 @@
+/* CardCargo v96 - shipment summary, package image previews and archive downloads */
+
+/* The old shipment summary values remain in source for compatibility but are
+   visually replaced by the OLAEET-aware summary. Actions stay untouched. */
+.shipment-summary-block > span,
+.shipment-summary-block > strong {
+  display: none !important;
+}
+
+.shipment-summary-block {
+  min-width: min(100%, 360px);
+  display: grid !important;
+  gap: 10px !important;
+  align-content: start;
+  padding: 12px !important;
+  border: 1px solid var(--cc93-border, #e3e7ec) !important;
+  border-radius: var(--cc93-radius, 10px) !important;
+  background: var(--cc93-surface, #fff) !important;
+  box-shadow: var(--cc93-shadow, 0 1px 2px rgba(16, 24, 40, 0.04)) !important;
+}
+
+.cc96-header-summary {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 0.9fr);
+  gap: 8px;
+}
+
+.cc96-summary-stat {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  padding: 10px 11px;
+  border: 1px solid var(--cc93-border, #e3e7ec);
+  border-radius: 8px;
+  background: var(--cc93-surface-muted, #f9fafb);
+}
+
+.cc96-summary-stat-accent {
+  border-color: #cadfce;
+  background: var(--cc93-accent-soft, #edf5ef);
+}
+
+.cc96-summary-stat span {
+  color: var(--cc93-muted, #667085);
+  font-size: 10.5px;
+  font-weight: 650;
+  line-height: 1.25;
+  letter-spacing: 0.025em;
+  text-transform: uppercase;
+}
+
+.cc96-summary-stat strong {
+  min-width: 0;
+  color: var(--cc93-text, #20262e);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.shipment-summary-block .detail-actions {
+  width: 100%;
+  margin-top: 0 !important;
+  padding-top: 2px;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px !important;
+  align-items: stretch !important;
+}
+
+.shipment-summary-block .detail-actions > * {
+  min-width: 0;
+}
+
+.shipment-summary-block .detail-actions .button {
+  width: 100%;
+  justify-content: center;
+}
+
+/* Package rows: add a compact preview column without disturbing the aligned
+   data columns from v94/v93. */
+.cc96-package {
+  grid-template-columns: 32px 28px minmax(0, 1fr) minmax(170px, auto) !important;
+  overflow: visible !important;
+}
+
+.cc96-package-preview-cell {
+  position: relative;
+  display: grid;
+  place-items: center;
+  overflow: visible;
+}
+
+.cc96-preview-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.cc96-preview-trigger,
+.cc96-preview-empty {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+}
+
+.cc96-preview-trigger {
+  border: 1px solid var(--cc93-border-strong, #d0d5dd);
+  background: var(--cc93-surface, #fff);
+  color: #475467;
+  cursor: pointer;
+}
+
+.cc96-preview-trigger:hover,
+.cc96-preview-trigger:focus-visible {
+  border-color: #aeb7c2;
+  background: var(--cc93-surface-muted, #f9fafb);
+  color: var(--cc93-accent, #315d3d);
+  outline: none;
+}
+
+.cc96-preview-empty {
+  color: #c4cbd4;
+  background: #f7f8fa;
+}
+
+.cc96-preview-popover {
+  position: absolute;
+  z-index: 50;
+  left: 50%;
+  bottom: calc(100% + 9px);
+  width: 250px;
+  max-width: min(250px, 70vw);
+  padding: 8px;
+  border: 1px solid var(--cc93-border-strong, #d0d5dd);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 14px 30px rgba(16, 24, 40, 0.16);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translate(-50%, 5px);
+  transition: opacity 120ms ease, transform 120ms ease, visibility 120ms ease;
+}
+
+.cc96-preview-popover::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -6px;
+  width: 10px;
+  height: 10px;
+  background: #fff;
+  border-right: 1px solid var(--cc93-border-strong, #d0d5dd);
+  border-bottom: 1px solid var(--cc93-border-strong, #d0d5dd);
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.cc96-preview-popover img {
+  display: block;
+  width: 100%;
+  max-height: 330px;
+  object-fit: contain;
+  border-radius: 7px;
+  background: #f6f7f9;
+}
+
+.cc96-preview-wrap:hover .cc96-preview-popover,
+.cc96-preview-wrap:focus-within .cc96-preview-popover {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, 0);
+}
+
+.cc96-package-link {
+  width: fit-content;
+  color: var(--cc93-text, #20262e) !important;
+  font-size: 12.5px;
+  font-weight: 700;
+  text-decoration: none !important;
+}
+
+.cc96-package-link:hover {
+  color: var(--cc93-accent, #315d3d) !important;
+  text-decoration: underline !important;
+  text-underline-offset: 2px;
+}
+
+.cc96-package-images-section {
+  overflow: visible;
+}
+
+.cc96-package-image-groups {
+  display: grid;
+  gap: 9px;
+}
+
+.cc96-package-image-group {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(190px, 0.38fr) minmax(0, 1.62fr);
+  gap: 12px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--cc93-border, #e3e7ec);
+  border-radius: 9px;
+  background: #fff;
+}
+
+.cc96-package-image-group-head {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cc96-package-image-group-head > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.cc96-package-image-group-head a,
+.cc96-package-image-group-head strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--cc93-text, #20262e) !important;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.cc96-package-image-group-head span,
+.cc96-package-image-group-head small {
+  color: var(--cc93-muted, #667085);
+  font-size: 11px;
+}
+
+.cc96-package-thumbnails {
+  min-width: 0;
+  display: flex;
+  gap: 7px;
+  overflow-x: auto;
+  padding: 2px 2px 5px;
+  scrollbar-width: thin;
+}
+
+.cc96-package-thumbnails figure {
+  flex: 0 0 88px;
+  margin: 0;
+}
+
+.cc96-package-thumbnails img {
+  display: block;
+  width: 88px;
+  height: 88px;
+  object-fit: cover;
+  border: 1px solid var(--cc93-border, #e3e7ec);
+  border-radius: 7px;
+  background: #f6f7f9;
+}
+
+.cc96-package-thumbnails figcaption {
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--cc93-muted, #667085);
+  font-size: 9.5px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Archived image downloads exist only on the Bunjang purchase and OLAEET
+   warehouse-package detail routes. */
+.cc96-download-all {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.cc96-image-download-button {
+  position: absolute;
+  z-index: 3;
+  top: 7px;
+  right: 7px;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(208, 213, 221, 0.92);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #344054;
+  box-shadow: 0 1px 4px rgba(16, 24, 40, 0.1);
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+}
+
+.cc96-image-download-button:hover,
+.cc96-image-download-button:focus-visible {
+  color: var(--cc93-accent, #315d3d);
+  border-color: #aeb7c2;
+  outline: none;
+}
+
+@media (max-width: 800px) {
+  .cc96-header-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .shipment-summary-block {
+    min-width: 100%;
+  }
+
+  .cc96-package {
+    grid-template-columns: 28px 28px minmax(0, 1fr) !important;
+  }
+
+  .cc96-package .cc94-package-meta {
+    grid-column: 3;
+    text-align: left;
+  }
+
+  .cc96-package-image-group {
+    grid-template-columns: 1fr;
+  }
+}

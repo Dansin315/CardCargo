@@ -1,0 +1,263 @@
+.assignmentPanel {
+  overflow: visible;
+}
+
+.assignmentGrid {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.78fr) minmax(0, 2fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.packageSummary {
+  position: sticky;
+  top: 18px;
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, currentColor 13%, transparent);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--surface, #fff) 96%, #dca66b 4%);
+}
+
+.packageSummaryHeader {
+  display: grid;
+  gap: 5px;
+}
+
+.packageSummaryHeader strong {
+  font-size: 1.06rem;
+  overflow-wrap: anywhere;
+}
+
+.packageSummaryHeader small,
+.metaLine,
+.filterHint,
+.purchaseMeta {
+  opacity: 0.72;
+}
+
+.packageImage {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  border-radius: 14px;
+  background: color-mix(in srgb, currentColor 6%, transparent);
+}
+
+.packageImage img,
+.purchaseThumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.packageImagePlaceholder {
+  min-height: 118px;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  padding: 16px;
+  font-size: 0.88rem;
+  opacity: 0.62;
+}
+
+.packageFacts {
+  display: grid;
+  gap: 8px;
+}
+
+.factRow {
+  display: grid;
+  grid-template-columns: 98px 1fr;
+  gap: 10px;
+  font-size: 0.9rem;
+}
+
+.factRow span:first-child {
+  opacity: 0.62;
+}
+
+.purchaseWorkspace {
+  min-width: 0;
+  display: grid;
+  gap: 14px;
+}
+
+.filterBar {
+  display: grid;
+  grid-template-columns: minmax(190px, 1.4fr) repeat(2, minmax(138px, 0.72fr)) minmax(190px, 0.9fr);
+  gap: 10px;
+  align-items: end;
+}
+
+.filterBar label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.86rem;
+  font-weight: 650;
+}
+
+.filterBar input,
+.filterBar select {
+  width: 100%;
+}
+
+.filterActions,
+.selectionBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.selectionBar {
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: color-mix(in srgb, currentColor 4%, transparent);
+}
+
+.selectionButtons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.purchaseList {
+  display: grid;
+  gap: 10px;
+  max-height: 760px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.purchaseCard {
+  display: grid;
+  grid-template-columns: auto 92px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 11px;
+  border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  border-radius: 16px;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+}
+
+.purchaseCard:hover {
+  border-color: color-mix(in srgb, currentColor 28%, transparent);
+  transform: translateY(-1px);
+}
+
+.purchaseCardSelected {
+  border-color: color-mix(in srgb, #b87524 68%, transparent);
+  background: color-mix(in srgb, #e7b46f 12%, transparent);
+}
+
+.purchaseCard input[type='checkbox'] {
+  width: 19px;
+  height: 19px;
+  margin: 0;
+}
+
+.purchaseThumb {
+  width: 92px;
+  height: 76px;
+  border-radius: 11px;
+  overflow: hidden;
+  background: color-mix(in srgb, currentColor 6%, transparent);
+}
+
+.purchaseThumbPlaceholder {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  font-size: 0.73rem;
+  opacity: 0.56;
+  text-align: center;
+  padding: 6px;
+}
+
+.purchaseInfo {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.purchaseInfo strong {
+  overflow-wrap: anywhere;
+}
+
+.purchaseMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 9px;
+  font-size: 0.82rem;
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  background: color-mix(in srgb, currentColor 7%, transparent);
+}
+
+.badgeLikely {
+  background: color-mix(in srgb, #2c9a5f 14%, transparent);
+}
+
+.badgeSelected {
+  background: color-mix(in srgb, #c47b22 16%, transparent);
+}
+
+.emptyFiltered {
+  padding: 28px 18px;
+  text-align: center;
+  border: 1px dashed color-mix(in srgb, currentColor 17%, transparent);
+  border-radius: 16px;
+}
+
+@media (max-width: 980px) {
+  .assignmentGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .packageSummary {
+    position: static;
+  }
+
+  .filterBar {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .filterBar {
+    grid-template-columns: 1fr;
+  }
+
+  .purchaseCard {
+    grid-template-columns: auto 72px minmax(0, 1fr);
+  }
+
+  .purchaseThumb {
+    width: 72px;
+    height: 66px;
+  }
+
+  .factRow {
+    grid-template-columns: 86px 1fr;
+  }
+}

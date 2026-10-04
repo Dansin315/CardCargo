@@ -1,0 +1,25 @@
+
+/* v29: delivered shipment -> inventory transfer */
+.shipment-inventory-transfer {
+  display: grid;
+  justify-items: end;
+  gap: 0.5rem;
+  max-width: 34rem;
+}
+
+.shipment-inventory-transfer small {
+  text-align: right;
+  line-height: 1.4;
+}
+
+@media (max-width: 760px) {
+  .shipment-inventory-transfer {
+    justify-items: stretch;
+    width: 100%;
+    max-width: none;
+  }
+
+  .shipment-inventory-transfer small {
+    text-align: left;
+  }
+}

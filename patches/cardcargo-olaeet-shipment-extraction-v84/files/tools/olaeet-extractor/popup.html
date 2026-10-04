@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>CardCargo OLAEET</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        font: 14px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        width: 340px;
+        padding: 16px;
+        margin: 0;
+        color: #172033;
+      }
+      h1 { font-size: 17px; margin: 0 0 6px; }
+      p { line-height: 1.45; margin: 0 0 14px; color: #5c667a; }
+      button {
+        width: 100%;
+        padding: 11px 12px;
+        border: 0;
+        border-radius: 10px;
+        cursor: pointer;
+        font-weight: 700;
+        background: #173c76;
+        color: white;
+      }
+      button:disabled { opacity: .55; cursor: wait; }
+      #status {
+        margin-top: 12px;
+        min-height: 42px;
+        white-space: pre-line;
+        line-height: 1.4;
+        color: #39445a;
+      }
+      .hint {
+        margin-top: 12px;
+        padding-top: 12px;
+        border-top: 1px solid #e5e9f0;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>CardCargo OLAEET Extractor</h1>
+    <p>
+      Erkennt automatisch, ob die aktuelle OLAEET-Seite eine Lagerübersicht
+      oder das geöffnete Shipping-Popup enthält.
+    </p>
+    <button id="copy" type="button">Aktuelle OLAEET-Seite auslesen</button>
+    <div id="status" role="status"></div>
+    <p class="hint">
+      Bei einer internationalen Sendung wird strukturiertes JSON inklusive
+      enthaltener STR-Pakete in die Zwischenablage kopiert.
+    </p>
+    <script src="popup.js"></script>
+  </body>
+</html>

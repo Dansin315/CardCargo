@@ -1,0 +1,205 @@
+/* BEGIN CardCargo Inventory v1 v14 */
+.purchase-item-summary-list,
+.purchase-item-editor-list,
+.inventory-unit-list,
+.inventory-pending-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.purchase-item-summary-row,
+.purchase-item-editor-row,
+.inventory-pending-row,
+.inventory-unit-row {
+  display: grid;
+  gap: 1rem;
+  align-items: center;
+  padding: 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 0.9rem;
+  background: var(--surface-subtle, rgba(255, 255, 255, 0.02));
+}
+
+.purchase-item-summary-row {
+  grid-template-columns: 74px minmax(0, 1fr) auto auto;
+}
+
+.purchase-item-editor-row {
+  grid-template-columns: 74px minmax(0, 1fr) auto auto;
+}
+
+.inventory-pending-row {
+  grid-template-columns: 74px minmax(0, 1fr) auto auto;
+}
+
+.inventory-unit-row {
+  grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(120px, 1fr));
+}
+
+.purchase-item-summary-main,
+.purchase-item-summary-metrics,
+.purchase-item-summary-cost,
+.purchase-item-editor-main,
+.purchase-item-editor-quantity,
+.inventory-unit-row > div,
+.inventory-pending-row > div:not(.catalog-reference-thumb) {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.purchase-item-summary-main span,
+.purchase-item-summary-main small,
+.purchase-item-editor-main span,
+.purchase-item-editor-main small,
+.purchase-item-summary-metrics span,
+.purchase-item-summary-cost span,
+.purchase-item-editor-quantity span,
+.inventory-unit-row span,
+.inventory-pending-row span,
+.inventory-pending-row small {
+  color: var(--muted);
+}
+
+.purchase-item-editor-actions {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.catalog-reference-thumb,
+.catalog-candidate-image {
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 0.7rem;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  min-height: 70px;
+  text-align: center;
+  font-size: 0.75rem;
+}
+
+.catalog-reference-thumb img {
+  width: 64px;
+  max-height: 90px;
+  object-fit: contain;
+}
+
+.purchase-item-form {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.catalog-search-bar {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.catalog-search-bar span {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.catalog-candidate-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+
+.catalog-candidate {
+  display: grid;
+  gap: 0.7rem;
+  padding: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 0.85rem;
+}
+
+.catalog-candidate-image {
+  min-height: 190px;
+}
+
+.catalog-candidate-image img {
+  max-width: 150px;
+  max-height: 200px;
+  object-fit: contain;
+}
+
+.catalog-candidate > div:not(.catalog-candidate-image) {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.catalog-candidate span,
+.catalog-candidate small {
+  color: var(--muted);
+}
+
+.catalog-selected-card {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr) auto;
+  gap: 0.85rem;
+  align-items: center;
+  padding: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 0.85rem;
+}
+
+.catalog-selected-card img {
+  width: 64px;
+  max-height: 90px;
+  object-fit: contain;
+}
+
+.catalog-selected-card > div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.catalog-selected-card span,
+.catalog-selected-card small {
+  color: var(--muted);
+}
+
+.inventory-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.inventory-kpi-grid .panel {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.inventory-kpi-grid span {
+  color: var(--muted);
+}
+
+.inventory-kpi-grid strong {
+  font-size: 1.6rem;
+}
+
+@media (max-width: 900px) {
+  .purchase-item-summary-row,
+  .purchase-item-editor-row,
+  .inventory-pending-row,
+  .inventory-unit-row,
+  .catalog-selected-card {
+    grid-template-columns: 1fr;
+  }
+
+  .purchase-item-editor-actions {
+    justify-content: flex-start;
+  }
+
+  .inventory-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+}
+/* END CardCargo Inventory v1 v14 */

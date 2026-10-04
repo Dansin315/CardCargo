@@ -1,0 +1,159 @@
+/* CardCargo v94 - OLAEET shipment persistence/detail UI */
+.cc94-shipment-details {
+  display: grid;
+  gap: 20px;
+}
+
+.cc94-heading {
+  align-items: flex-start !important;
+  margin-bottom: 0 !important;
+}
+
+.cc94-heading h2 {
+  margin-top: 4px !important;
+  font-size: 20px !important;
+}
+
+.cc94-tracking {
+  min-width: 210px;
+  text-align: right;
+}
+
+.cc94-tracking span,
+.cc94-field span,
+.cc94-box span,
+.cc94-package span {
+  color: var(--cc93-muted, #667085);
+  font-size: 12px;
+}
+
+.cc94-tracking strong {
+  display: block;
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+}
+
+.cc94-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
+  gap: 10px;
+}
+
+.cc94-field {
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid var(--cc93-border, #e3e7ec);
+  border-radius: 9px;
+  background: var(--cc93-surface-muted, #f9fafb);
+}
+
+.cc94-field strong {
+  display: block;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+
+.cc94-section {
+  display: grid;
+  gap: 10px;
+  padding-top: 18px;
+  border-top: 1px solid var(--cc93-border, #e3e7ec);
+}
+
+.cc94-section h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.cc94-section p {
+  margin: 3px 0 0;
+  color: var(--cc93-muted, #667085);
+  font-size: 12px;
+}
+
+.cc94-cost-grid .cc94-field:last-child {
+  border-color: #cadfce;
+  background: var(--cc93-accent-soft, #edf5ef);
+}
+
+.cc94-boxes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.cc94-box {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--cc93-border, #e3e7ec);
+  border-radius: 9px;
+}
+
+.cc94-package-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.cc94-package-list {
+  display: grid;
+  gap: 5px;
+}
+
+.cc94-package {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) minmax(170px, auto);
+  align-items: center;
+  gap: 10px;
+  min-height: 54px;
+  padding: 8px 10px;
+  border: 1px solid var(--cc93-border, #e3e7ec);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.cc94-package-index {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--cc93-surface-muted, #f9fafb);
+  font-weight: 700;
+}
+
+.cc94-package-main,
+.cc94-package-meta {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.cc94-package-main strong,
+.cc94-package-meta strong {
+  overflow-wrap: anywhere;
+  font-size: 12.5px;
+}
+
+.cc94-package-meta {
+  text-align: right;
+}
+
+@media (max-width: 720px) {
+  .cc94-tracking {
+    width: 100%;
+    text-align: left;
+  }
+
+  .cc94-package {
+    grid-template-columns: 28px minmax(0, 1fr);
+  }
+
+  .cc94-package-meta {
+    grid-column: 2;
+    text-align: left;
+  }
+}

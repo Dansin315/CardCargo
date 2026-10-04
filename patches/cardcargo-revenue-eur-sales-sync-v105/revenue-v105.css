@@ -1,0 +1,18 @@
+/* CardCargo v105 - Umsatz EUR-first + compact sale columns */
+.cc102-sheet {
+  min-width: 820px;
+}
+.cc102-sheet thead th:first-child {
+  width: 40%;
+}
+.cc102-sheet th:not(:first-child) {
+  width: 15%;
+}
+.cc102-metric-card:not(.cc102-fx-card) strong {
+  font-size: 22px;
+}
+.cc102-metric-card:not(.cc102-fx-card) > span:not(:first-child) {
+  color: var(--muted, #68716c);
+  font-size: 12px;
+  font-weight: 650;
+}

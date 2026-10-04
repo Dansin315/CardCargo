@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "CardCargo OLAEET Extractor",
+  "version": "1.0.0",
+  "description": "Kopiert sichtbare OLAEET-Paketdaten zur lokalen CardCargo-Importseite.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "clipboardWrite"
+  ],
+  "action": {
+    "default_title": "OLAEET-Daten für CardCargo kopieren",
+    "default_popup": "popup.html"
+  }
+}

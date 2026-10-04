@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "CardCargo Bunjang Order Extractor",
+  "version": "4.6.0",
+  "description": "Bunjang Smart-Sync: Summary-first Zeitraumfilter, Detail-Cache, optionaler langsamer Karten-Fallback und gerenderte Tracking-Extraktion.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "clipboardWrite",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://order.bunjang.co.kr/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://order.bunjang.co.kr/*"
+      ],
+      "js": [
+        "capture-bridge.js"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://order.bunjang.co.kr/*"
+      ],
+      "js": [
+        "network-hook-main.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    }
+  ],
+  "action": {
+    "default_title": "Bunjang-Bestellungen für CardCargo synchronisieren",
+    "default_popup": "popup.html"
+  }
+}

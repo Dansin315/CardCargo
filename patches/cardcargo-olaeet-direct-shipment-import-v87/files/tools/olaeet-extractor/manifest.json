@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "CardCargo OLAEET Extractor",
+  "version": "2.2.0",
+  "description": "CardCargo OLAEET Extractor: vollständige Shipping-Panel-Extraction mit Item/Box-Abgleich, Paketempfänger, Uhrzeiten und direktem Shipment-Import.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "clipboardWrite"
+  ],
+  "action": {
+    "default_title": "OLAEET-Daten für CardCargo extrahieren",
+    "default_popup": "popup.html"
+  }
+}
